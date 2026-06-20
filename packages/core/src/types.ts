@@ -88,6 +88,16 @@ export type HistoryEntry = {
   note: string;
 };
 
+export type EngagementMetric = {
+  platform: PlatformId;
+  postId: string;
+  likes: number;
+  comments: number;
+  shares: number;
+  views: number;
+  fetchedAt: string;
+};
+
 export type Content = {
   id: string;
   topic: string;
@@ -101,6 +111,7 @@ export type Content = {
   posts: PostRecord[];
   history: HistoryEntry[];
   revisionCount: number;
+  engagement: EngagementMetric[];
   createdAt: string;
   updatedAt: string;
 };
@@ -120,6 +131,7 @@ export function createContent(opts: { id: string; topic: string; persona?: strin
     posts: [],
     history: [],
     revisionCount: 0,
+    engagement: [],
     createdAt: now,
     updatedAt: now,
   };

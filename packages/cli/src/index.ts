@@ -1,4 +1,4 @@
-import { createApp, saveContent, listContentIds, loadContent } from './app.js';
+import { createApp, saveContent, listContentIds, loadContent, savePersonas, fetchAndAppendEngagement } from './app.js';
 import { Pipeline } from '@ima/core';
 
 async function main(): Promise<void> {
@@ -21,12 +21,24 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (cmd === 'run-with-persona') {
+    const personaId = argv[1];
+    const topic = argv.slice(2).join(' ').trim();
+    if (!personaId || !topic) throw new Error('usage: ima run-with-persona <persona-id> <topic>');
+    if (!app.personas.has(personaId)) throw new Error(`persona not found: ${personaId}`);
+    const c = Pipeline.createContent(topic, personaId);
+    const final = await app.pipeline.run(c);
+    await saveContent(app.store, final);
+    console.log(`[ok] ${final.id} persona=${personaId} stage=${final.stage} posts=${final.posts.length}`);
+    return;
+  }
+
   if (cmd === 'list') {
     const ids = await listContentIds(app.store);
     for (const id of ids) {
       const c = await loadContent(app.store, id);
       if (!c) continue;
-      console.log(`${c.id}  [${c.stage.padEnd(14)}]  topic="${c.topic}"  posts=${c.posts.length}`);
+      console.log(`${c.id}  [${c.stage.padEnd(14)}]  persona=${c.persona.padEnd(15)}  topic="${c.topic}"  posts=${c.posts.length}  eng=${c.engagement.length}`);
     }
     return;
   }
@@ -56,22 +68,92 @@ async function main(): Promise<void> {
     for (const r of rpt) console.log(`${r.ok ? 'OK ' : 'FAIL'}  ${r.id.padEnd(12)}  ${r.detail}`);
     const crawlerCheck = await app.crawler.fetch('https://example.com/ping').catch(() => null);
     console.log(crawlerCheck ? 'OK   crawler      composite ok' : 'FAIL  crawler      unreachable');
+    console.log(`OK   engagement   ${createEngagementInfo()}`);
+    return;
+  }
+
+  if (cmd === 'persona') {
+    const sub = argv[1];
+    if (sub === 'list') {
+      const list = app.personas.list();
+      for (const p of list) {
+        console.log(`${p.id.padEnd(20)}  ${p.name.padEnd(20)}  tone=${p.tone}  platforms=${p.defaultPlatforms.length}`);
+      }
+      return;
+    }
+    if (sub === 'show') {
+      const id = argv[2];
+      if (!id) throw new Error('usage: ima persona show <id>');
+      const p = app.personas.get(id);
+      if (!p) throw new Error(`persona not found: ${id}`);
+      console.log(JSON.stringify(p, null, 2));
+      return;
+    }
+    if (sub === 'add') {
+      const id = argv[2];
+      const name = argv[3];
+      const tone = argv[4] ?? 'professional';
+      if (!id || !name) throw new Error('usage: ima persona add <id> <name> [tone]');
+      app.personas.upsert({
+        id,
+        name,
+        tone,
+        targetAudience: argv[5] ?? 'general',
+        signaturePhrases: [],
+        bannedWords: [],
+        defaultPlatforms: [],
+        examples: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+      await savePersonas(app.store, app.personas);
+      console.log(`[ok] persona added: ${id}`);
+      return;
+    }
+    if (sub === 'remove') {
+      const id = argv[2];
+      if (!id) throw new Error('usage: ima persona remove <id>');
+      const ok = app.personas.remove(id);
+      if (!ok) throw new Error(`persona not found: ${id}`);
+      await savePersonas(app.store, app.personas);
+      console.log(`[ok] persona removed: ${id}`);
+      return;
+    }
+    throw new Error(`unknown persona subcommand: ${sub}`);
+  }
+
+  if (cmd === 'feedback') {
+    const ids = await listContentIds(app.store);
+    const contents = await Promise.all(ids.map((id) => loadContent(app.store, id)));
+    const valid = contents.filter((c): c is NonNullable<typeof c> => c !== null && c.posts.length > 0);
+    const metrics = await fetchAndAppendEngagement(app.store, valid);
+    console.log(`[ok] fetched ${metrics.length} engagement records across ${valid.length} contents`);
     return;
   }
 
   throw new Error(`unknown command: ${cmd}`);
 }
 
+function createEngagementInfo(): string {
+  return 'tracker ready (MockEngagementTracker)';
+}
+
 function printHelp(): void {
   console.log(`ima — influencer multi-agent CLI
 
 Usage:
-  ima run <topic>        Create content and run pipeline to done
-  ima list               List all content records
-  ima status <id>        Show content detail (JSON)
-  ima step <id>          Run one pipeline step on existing content
-  ima doctor             Check crawler + channel health
-  ima help               This help
+  ima run <topic>                       Create content and run pipeline to done
+  ima run-with-persona <id> <topic>     Run pipeline with a specific persona
+  ima list                              List all content records
+  ima status <id>                       Show content detail (JSON)
+  ima step <id>                         Run one pipeline step on existing content
+  ima doctor                            Check crawler + channel + engagement health
+  ima persona list                      List all personas
+  ima persona show <id>                 Show persona detail (JSON)
+  ima persona add <id> <name> [tone]    Add a new persona
+  ima persona remove <id>               Remove a persona
+  ima feedback                          Fetch engagement for all done contents
+  ima help                              This help
 `);
 }
 

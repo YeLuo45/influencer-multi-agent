@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { assertTransition, InvalidTransition, isTerminal } from './state-machine.js';
-import type { Content, ContentStage, HistoryEntry } from './types.js';
+import type { Content, ContentStage, EngagementMetric, HistoryEntry } from './types.js';
 import { createContent } from './types.js';
 import type { AgentContext } from './protocol.js';
 import {
@@ -12,10 +12,13 @@ import {
   PublishAgent,
   AuditAgent,
 } from './agents/index.js';
+import type { Persona } from './persona.js';
 
 export interface PipelineOptions {
   maxRevisionRounds?: number;
   ideaCount?: number;
+  feedback?: EngagementMetric[];
+  personaLookup?: (id: string) => Persona | null;
 }
 
 const DEFAULT_MAX_REVISIONS = 3;
@@ -30,10 +33,14 @@ export class Pipeline {
   private readonly audit = new AuditAgent();
   private readonly maxRevisions: number;
   private readonly ideaCount: number;
+  private readonly feedback: EngagementMetric[];
+  private readonly personaLookup: (id: string) => Persona | null;
 
   constructor(private readonly ctx: AgentContext, opts: PipelineOptions = {}) {
     this.maxRevisions = opts.maxRevisionRounds ?? DEFAULT_MAX_REVISIONS;
     this.ideaCount = opts.ideaCount ?? 5;
+    this.feedback = opts.feedback ?? [];
+    this.personaLookup = opts.personaLookup ?? (() => null);
   }
 
   static createContent(topic: string, persona?: string): Content {
@@ -60,6 +67,7 @@ export class Pipeline {
 
   private async dispatch(content: Content): Promise<{ ok: true; content: Content; advanced: boolean } | { ok: false }> {
     const from = content.stage;
+    const persona = this.personaLookup(content.persona);
     switch (from) {
       case 'intake':
         return this.simpleTransition(content, 'research');
@@ -69,12 +77,16 @@ export class Pipeline {
         return this.applyOk(content, 'ideas', 'research', `captured ${r.data.length} sources`, (c) => ({ ...c, sources: r.data }));
       }
       case 'ideas': {
-        const r = await this.idea.run({ count: this.ideaCount }, content, this.ctx);
+        const r = await this.idea.run(
+          { count: this.ideaCount, feedback: this.feedback, persona },
+          content,
+          this.ctx,
+        );
         if (r.kind !== 'ok') return { ok: false };
         return this.applyOk(content, 'draft', 'idea', `generated ${r.data.length} ideas`, (c) => ({ ...c, ideas: r.data }));
       }
       case 'draft': {
-        const r = await this.draft.run({ ideaIndex: 0 }, content, this.ctx);
+        const r = await this.draft.run({ ideaIndex: 0, persona }, content, this.ctx);
         if (r.kind !== 'ok') return { ok: false };
         return this.applyOk(content, 'review', 'draft', `drafted: ${r.data.title}`, (c) => ({ ...c, draft: r.data }));
       }
@@ -87,7 +99,6 @@ export class Pipeline {
       }
       case 'needs_revision': {
         if (content.revisionCount >= this.maxRevisions) {
-          // 强制 done，避免无限循环
           return this.applyOk(content, 'done', 'pipeline', 'max revisions reached, capping to done', (c) => c);
         }
         return this.applyOk(
@@ -144,7 +155,6 @@ export class Pipeline {
       assertTransition(content.stage, to);
     } catch (e) {
       if (e instanceof InvalidTransition) {
-        // 兜底：若 review 决策后需要走 needs_revision 但状态不允许，记入 history
         const entry = this.entry(content.stage, content.stage, agent, `blocked: ${e.message}`);
         return { ok: true, content: { ...content, history: [...content.history, entry], updatedAt: this.ctx.now() }, advanced: false };
       }

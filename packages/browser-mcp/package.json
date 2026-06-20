@@ -6,19 +6,21 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": "./dist/index.js",
-    "./server": "./dist/server.js"
+    "./server": "./dist/server.js",
+    "./http": "./dist/http.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
-    "start": "node --import tsx src/server.ts"
+    "start": "node --import tsx src/cli.ts",
+    "start:http": "node --import tsx src/http-cli.ts"
   },
   "dependencies": {
     "@ima/core": "0.1.0"
   },
   "devDependencies": {
-    "@types/node": "^20.12.7",
+    "typescript": "5.6.3",
     "tsx": "4.19.2",
-    "typescript": "5.6.3"
+    "@types/node": "20.12.7"
   }
 }

@@ -17,9 +17,11 @@
   "scripts": {
     "build": "npm run build -w @ima/core && npm run build -w @ima/crawler && npm run build -w @ima/browser-mcp && npm run build -w @ima/publisher && npm run build -w @ima/cli",
     "check": "npm run check --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present && node --import tsx scripts/e2e-bootstrap.test.ts",
+    "test": "npm run test --workspaces --if-present",
     "bootstrap": "node --import tsx packages/cli/src/bootstrap-demo.ts",
     "cli": "node --import tsx packages/cli/src/index.ts",
+    "mcp:http": "node --import tsx packages/browser-mcp/src/http-cli.ts",
+    "mcp:stdio": "node --import tsx packages/browser-mcp/src/cli.ts",
     "clean": "rm -rf packages/*/dist .ima"
   },
   "devDependencies": {

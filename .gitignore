@@ -6,3 +6,5 @@ dist/
 .env
 .env.local
 *.log
+test-build/
+packages/core/test-build/

@@ -13,6 +13,12 @@ declare const process: {
   version: string;
   pid: number;
   nextTick(cb: () => void): void;
+  on(event: string, listener: (...args: unknown[]) => void): void;
+  once(event: string, listener: (...args: unknown[]) => void): void;
+  off(event: string, listener: (...args: unknown[]) => void): void;
+  removeListener(event: string, listener: (...args: unknown[]) => void): void;
+  removeAllListeners(event?: string): void;
+  listeners(event: string): Array<(...args: unknown[]) => void>;
 };
 
 declare const console: {
@@ -23,18 +29,16 @@ declare const console: {
   debug(...args: unknown[]): void;
 };
 
+type AnyBuffer = { toString(encoding?: string): string };
 declare const Buffer: {
-  from(data: string | Uint8Array, encoding?: string): Uint8Array;
-  alloc(size: number, fill?: number): Uint8Array;
-  toString(buf: Uint8Array, encoding?: string): string;
-  isBuffer(obj: unknown): boolean;
+  isBuffer(obj: unknown): obj is AnyBuffer;
 };
-
-declare const setTimeout: (cb: () => void, ms?: number) => unknown;
+declare const setTimeout: (cb: (value?: unknown) => void, ms?: number) => unknown;
 declare const clearTimeout: (id: unknown) => void;
-declare const setInterval: (cb: () => void, ms?: number) => unknown;
+declare const setInterval: (cb: (value?: unknown) => void, ms?: number) => unknown;
 declare const clearInterval: (id: unknown) => void;
-declare const setImmediate: (cb: () => void) => unknown;
+type ImmediateFn = (cb: (value?: unknown) => void) => unknown;
+declare const setImmediate: ImmediateFn;
 declare const queueMicrotask: (cb: () => void) => void;
 declare const global: Record<string, unknown>;
 declare const __dirname: string;
@@ -73,10 +77,11 @@ declare class AbortController {
 }
 
 interface AbortSignal {
-  aborted: boolean;
+  readonly aborted: boolean;
   addEventListener(type: 'abort', listener: () => void): void;
   removeEventListener(type: 'abort', listener: () => void): void;
 }
+declare const AbortSignal_: { new (): AbortSignal };
 
 declare class URL {
   constructor(input: string, base?: string | URL);
@@ -166,6 +171,11 @@ declare module 'node:crypto' {
   export function randomUUID(): string;
 }
 
+declare module 'node:http' {
+  import type { IncomingMessage, ServerResponse, Server } from 'node:http';
+  export function createServer(handler: (req: IncomingMessage, res: ServerResponse) => void): Server;
+}
+
 declare module 'node:test' {
   export function test(name: string, fn: () => void | Promise<void>): void;
   export function test(name: string, opts: { skip?: boolean }, fn: () => void | Promise<void>): void;
@@ -191,6 +201,7 @@ declare module 'node:assert' {
     function notOk(value: unknown, msg?: string): void;
     function deepEqual<T>(actual: T, expected: T, msg?: string): void;
     function match(value: string, reg: RegExp | string, msg?: string): void;
+    function doesNotMatch(value: string, reg: RegExp | string, msg?: string): void;
     function rejects(block: () => unknown | Promise<unknown>, error?: RegExp | Error | Function, msg?: string): Promise<void>;
     function throws(block: () => unknown, error?: RegExp | Error | Function, msg?: string): void;
     function fail(msg?: string): never;

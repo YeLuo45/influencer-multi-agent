@@ -150,24 +150,56 @@ agent 用 MCP 协议调 `@ima/browser-mcp` 抓需要 JS 渲染的页面（如小
 
 路由策略：先 `http`，失败 → `playwright`，失败 → `crawl4ai`。
 
-## 10. test pyramid
+## 9. HTTP MCP transport（v0.2 新增）
 
-- `@ima/core/test/state-machine.test.ts` — 每个 transition edge 覆盖
-- `@ima/crawler/test/*.test.ts` — 路由策略
-- `@ima/publisher/test/*.test.ts` — 每个 channel post 接口契约
-- `scripts/e2e-bootstrap.test.ts` — 端到端跑完 1 条 content
+`@ima/browser-mcp/src/http.ts` `McpHttpServer` 暴露 Streamable HTTP transport：
+- `POST /mcp` — JSON-RPC 请求，返回 JSON（或 SSE 如果 Accept 含 `text/event-stream`）
+- `GET /mcp` — 打开 SSE 长连接（heartbeat 15s, session-max-age 5min）
+- `DELETE /mcp` — 关闭 session (204)
+- `GET /health` — 健康检查
 
-## 11. 不做什么（v0.1 边界）
+`asHttpHandler(server)` 桥接 stdio `McpServer` → HTTP handler。`startHttpServer(server, opts)` 完整引导。
+CLI 命令 `npm run mcp:http` 启动 HTTP server（默认 `127.0.0.1:3000`），`npm run mcp:stdio` 启动 stdio server。
 
-- 不接真实 LLM API（保留接口 + MockLlm 默认）
-- 不接真实社媒 API（5 个 channel 都是 stub）
-- 不做用户/账号管理（v0.1 单 persona = "default"）
-- 不做评论自动回复（v0.2+）
+## 10. engagement + idea ranker（v0.2 新增）
 
-## 12. 后续迭代方向
+`@ima/core/engagement.ts` 定义 `EngagementMetric` + `deriveScore` + `aggregate`。
+`@ima/core/idea-ranker.ts` `IdeaRanker.rank(ideas, feedback, ideaAngleFor)`：根据历史 engagement 加成高分 idea。
+`@ima/core/engagement-tracker.ts` `MockEngagementTracker` + `CompositeEngagementTracker` + `createEngagementTracker()`。
+`Pipeline` 注入 `feedback: EngagementMetric[]`，在 ideas 阶段让 IdeaAgent 应用 ranker。
+CLI `npm run cli -- feedback` 拉取所有 done content 的 engagement 写入 storage。
 
-1. 接真实 LLM（Anthropic/OpenAI/OpenAI-compatible CRS）
-2. 接真实 channel（X/Twitter API、XHS web 登录态）
-3. 内容效果回流 → 自动 re-rank ideas
-4. 多 persona 管理（一个人管多个大 V）
-5. 多语言（中/英/日）自动翻译
+## 11. persona management（v0.2 新增）
+
+`@ima/core/persona.ts` 定义 `Persona` + `PersonaRegistry` + `applyPersonaToPrompt(persona, prompt)`。
+`Pipeline` 注入 `personaLookup(id)`，在 ideas / draft 阶段让 agent 把 persona 信息加入 prompt。
+CLI 命令：
+- `ima persona list`
+- `ima persona show <id>`
+- `ima persona add <id> <name> [tone]`
+- `ima persona remove <id>`
+内置 3 个 persona：`default` / `tech-insight` / `lifestyle`。
+
+## 12. test pyramid
+
+- `@ima/core/test/` — 48 tests（state-machine × 7, storage × 4, llm × 4, pipeline × 5, engagement × 5, idea-ranker × 7, engagement-tracker × 7, persona × 9）
+- `@ima/crawler/test/` — 9 tests
+- `@ima/publisher/test/` — 9 tests
+- `@ima/browser-mcp/test/` — 13 tests（http MCP server 全场景）
+- `scripts/e2e-bootstrap.test.ts` — 端到端跑通 1 条 content
+
+## 13. 不做什么（v0.2 边界）
+
+- 不接真实 LLM API（保留接口 + MockLlm 默认实现）
+- 不接真实社媒 API（5 个 channel 都是 deterministic stub）
+- 不做实时评论自动回复（v0.3+）
+- 不做自动 A/B 实验（v0.3+）
+
+## 14. 后续迭代方向（v0.3+）
+
+1. **真实 LLM 接入** — CRS API 已验证可用，env 切换 OpenAI-compatible endpoint
+2. **真实 channel 接入** — X/Twitter API + XHS web 登录态
+3. **自动 re-rank 闭环** — `feedback` → ranker → 下次 idea 生成
+4. **多语言** — 中/英/日自动翻译
+5. **评论自动回复** — agent 检测评论并自动互动
+6. **Web UI** — Vite + React 控制面板，调用 HTTP MCP server

@@ -1,12 +1,13 @@
 import type { Content, Draft } from '../types.js';
 import type { Agent, AgentContext, AgentResult } from '../protocol.js';
 import { err, ok } from '../protocol.js';
+import { applyPersonaToPrompt, type Persona } from '../persona.js';
 
-export class DraftAgent implements Agent<{ ideaIndex?: number }, Draft> {
+export class DraftAgent implements Agent<{ ideaIndex?: number; persona?: Persona | null }, Draft> {
   name = 'draft';
 
   async run(
-    input: { ideaIndex?: number },
+    input: { ideaIndex?: number; persona?: Persona | null },
     content: Content,
     ctx: AgentContext,
   ): Promise<AgentResult<Draft>> {
@@ -14,18 +15,22 @@ export class DraftAgent implements Agent<{ ideaIndex?: number }, Draft> {
     try {
       const idx = clamp(input.ideaIndex ?? 0, 0, content.ideas.length - 1);
       const idea = content.ideas[idx]!;
-      const title = await ctx.llm.complete(
-        `topic: ${content.topic}\nidea angle: ${idea.angle}\nhook: ${idea.hook}\nGenerate a Chinese title.`,
-        { maxTokens: 80 },
+      const persona = input.persona ?? null;
+      const titlePrompt = applyPersonaIfPersona(
+        persona,
+        `topic: ${content.topic}\npersona: ${content.persona}\nidea angle: ${idea.angle}\nhook: ${idea.hook}\nGenerate a Chinese title.`,
       );
-      const body = await ctx.llm.complete(
-        `topic: ${content.topic}\ntitle: ${title}\nangle: ${idea.angle}\nWrite a 200-word Chinese post body.`,
-        { maxTokens: 500 },
+      const bodyPrompt = applyPersonaIfPersona(
+        persona,
+        `topic: ${content.topic}\npersona: ${content.persona}\ntitle: PLACEHOLDER\nangle: ${idea.angle}\nWrite a 200-word Chinese post body.`,
       );
+      const title = await ctx.llm.complete(titlePrompt, { maxTokens: 80 });
+      const bodyPromptWithTitle = bodyPrompt.replace('PLACEHOLDER', title);
+      const body = await ctx.llm.complete(bodyPromptWithTitle, { maxTokens: 500 });
       const draft: Draft = {
         title: title.trim(),
         body: body.trim(),
-        tags: deriveTags(content.topic),
+        tags: deriveTags(content.topic, persona),
         coverHint: `${content.topic} ${idea.angle}（视觉建议：3:4 比例，重点突出）`,
         cta: '评论区聊聊你踩过哪些坑 👇',
         platformOverrides: {},
@@ -41,10 +46,19 @@ function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));
 }
 
-function deriveTags(topic: string): string[] {
+function deriveTags(topic: string, persona: Persona | null): string[] {
   const tags = new Set<string>();
   tags.add(`#${topic.replace(/\s+/g, '')}`);
   tags.add('#大V观察');
   tags.add('#热点');
+  if (persona) {
+    for (const phrase of persona.signaturePhrases.slice(0, 2)) {
+      tags.add(`#${phrase.replace(/\s+/g, '').slice(0, 16)}`);
+    }
+  }
   return Array.from(tags);
+}
+
+function applyPersonaIfPersona(persona: Persona | null, prompt: string): string {
+  return persona ? applyPersonaToPrompt(persona, prompt) : prompt;
 }
