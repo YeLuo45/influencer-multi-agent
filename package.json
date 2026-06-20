@@ -1,0 +1,30 @@
+{
+  "name": "influencer-multi-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "多智能体跨平台大 V 全自动运营交付系统：根据网上热点生成内容并跨平台发布",
+  "workspaces": [
+    "packages/core",
+    "packages/crawler",
+    "packages/browser-mcp",
+    "packages/publisher",
+    "packages/cli"
+  ],
+  "engines": {
+    "node": ">=20.10.0"
+  },
+  "scripts": {
+    "build": "npm run build -w @ima/core && npm run build -w @ima/crawler && npm run build -w @ima/browser-mcp && npm run build -w @ima/publisher && npm run build -w @ima/cli",
+    "check": "npm run check --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present && node --import tsx scripts/e2e-bootstrap.test.ts",
+    "bootstrap": "node --import tsx packages/cli/src/bootstrap-demo.ts",
+    "cli": "node --import tsx packages/cli/src/index.ts",
+    "clean": "rm -rf packages/*/dist .ima"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.7",
+    "tsx": "4.19.2",
+    "typescript": "5.6.3"
+  }
+}

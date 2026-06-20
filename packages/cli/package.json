@@ -1,0 +1,25 @@
+{
+  "name": "@ima/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "ima": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@ima/browser-mcp": "0.1.0",
+    "@ima/core": "0.1.0",
+    "@ima/crawler": "0.1.0",
+    "@ima/publisher": "0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "tsx": "4.19.2",
+    "typescript": "5.6.3"
+  }
+}

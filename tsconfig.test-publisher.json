@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./test-build",
+    "rootDir": ".",
+    "types": [],
+    "noEmit": false
+  },
+  "include": [
+    "types/node-globals.d.ts",
+    "packages/core/src/**/*.ts",
+    "packages/publisher/src/**/*.ts",
+    "packages/publisher/test/**/*.ts"
+  ]
+}
