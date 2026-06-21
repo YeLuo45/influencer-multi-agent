@@ -2,20 +2,32 @@ import { createApp, saveContent, listContentIds, loadContent, savePersonas, fetc
 import { Pipeline, buildAbReport } from '@ima/core';
 import { PublishWorker, summarizeQueue } from './queue-worker.js';
 import { startWebServer } from './web-server.js';
+import { spawn as defaultSpawn, type SpawnOptions } from 'node:child_process';
+
+// Local alias for `process.env`. Kept inline so this package compiles without
+// the shared `types/env.d.ts` ambient being pulled into its tsconfig.
+// The canonical `Env` interface lives at ../../types/env.d.ts.
+type Env = Record<string, string | undefined>;
 
 export interface WebOptions {
   port: number;
   host: string;
 }
 
-const BROWSER_UNSAFE_PORTS = new Set([6666]);
+const BROWSER_UNSAFE_PORTS = new Set<number>([
+  1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79,
+  87, 95, 101, 102, 103, 104, 109, 110, 111, 113, 115, 117, 119, 123, 135, 137,
+  139, 143, 161, 179, 389, 427, 465, 512, 513, 514, 515, 526, 530, 531, 532, 540,
+  548, 554, 556, 563, 587, 601, 636, 989, 990, 993, 995, 1719, 1720, 1723, 2049,
+  3659, 4045, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697, 10080,
+]);
 
 function valueAfterFlag(argv: string[], flag: string): string | undefined {
   const index = argv.indexOf(flag);
   return index >= 0 ? argv[index + 1] : undefined;
 }
 
-export function parseWebOptions(argv: string[], env: Record<string, string | undefined> = process.env as Record<string, string | undefined>): WebOptions {
+export function parseWebOptions(argv: string[], env: Env = process.env): WebOptions {
   const argvPort = valueAfterFlag(argv, '--port');
   const positionalPort = argv[1] && !argv[1].startsWith('-') ? argv[1] : undefined;
   const envPort = env.npm_config_port && env.npm_config_port !== 'true' ? env.npm_config_port : undefined;
@@ -32,9 +44,84 @@ export function parseWebOptions(argv: string[], env: Record<string, string | und
   return { port, host };
 }
 
-async function main(): Promise<void> {
+/**
+ * Build a plain `string[]` argv list from the parent npm invocation so
+ * `npm run <script> …` works without the `--` separator.
+ *
+ * Resolution rules:
+ * - `npm run web --port 6677` → argv = `['web', '--port', '6677']`
+ *   (the `web` script is just an alias; runCli still expects 'web' as argv[0]).
+ * - `npm run cli status c1` → argv = `['status', 'c1']`
+ *   (the `cli` script is a generic dispatcher; userArgs[0] is the subcommand).
+ * - `npm run queue:work --limit 1` → argv = `['queue', 'work', '--limit', '1']`
+ *   (alias preserved to keep the queue subcommand selector at argv[1]).
+ *
+ * Returns the script alias (if any) followed by the trailing user args.
+ */
+const NPM_SCRIPT_TO_CMD: Record<string, string[]> = {
+  web: ['web'],
+  queue: ['queue'],
+  'queue:work': ['queue', 'work'],
+  mcp: ['mcp'],
+  'mcp:http': ['mcp', 'http'],
+  'mcp:stdio': ['mcp', 'stdio'],
+};
+
+export function readNpmPassthroughArgs(env: Env = process.env): string[] {
+  const raw = env.npm_config_argv;
+  if (!raw) return [];
+  const parts = raw.split(/\s+/).filter(Boolean);
+  if (parts.length < 3) return [];
+  const scriptName = parts[2]!;
+  const userArgs = parts.slice(3);
+  const prefix = NPM_SCRIPT_TO_CMD[scriptName];
+  return prefix ? [...prefix, ...userArgs] : userArgs;
+}
+
+export type SpawnFn = (
+  command: string,
+  args: readonly string[],
+  options: SpawnOptions,
+) => ReturnType<typeof defaultSpawn>;
+
+export interface OpenBrowserOptions {
+  /** Override the detected platform (`process.platform`). */
+  platform?: string;
+  /** Inject a custom spawn (defaults to `node:child_process#spawn`). */
+  spawn?: SpawnFn;
+}
+
+/**
+ * Best-effort: open `url` in the host OS default browser.
+ *
+ * - macOS:   `open <url>`
+ * - Linux:   `xdg-open <url>`
+ * - Windows: `cmd /c start "" <url>`
+ *
+ * The browser is launched detached and unref'd so the CLI is not blocked.
+ * Any spawn failure (no DISPLAY, missing command) is swallowed — opening a
+ * browser must never break the CLI.
+ */
+export function openBrowser(url: string, opts: OpenBrowserOptions = {}): void {
+  const platform = opts.platform ?? process.platform;
+  const spawn = opts.spawn ?? defaultSpawn;
+  const detached = { stdio: 'ignore' as const, detached: true };
+  try {
+    if (platform === 'darwin') {
+      spawn('open', [url], detached);
+    } else if (platform === 'win32') {
+      spawn('cmd', ['/c', 'start', '""', url], detached);
+    } else {
+      spawn('xdg-open', [url], detached);
+    }
+  } catch {
+    // intentional: opening a browser is best-effort; do not fail the CLI
+  }
+}
+
+/** Public entry point for the CLI. argv is the raw subcommand + flags. */
+export async function runCli(argv: string[]): Promise<void> {
   const app = createApp();
-  const argv = process.argv.slice(2);
   const cmd = argv[0];
 
   if (!cmd || cmd === 'help' || cmd === '--help' || cmd === '-h') {
@@ -232,9 +319,15 @@ async function main(): Promise<void> {
 
   if (cmd === 'web') {
     const { port, host } = parseWebOptions(argv);
+    const noOpen = argv.includes('--no-open');
     const handle = await startWebServer({ store: app.store, host, port, now: app.now });
-    console.log(`[ok] web console at ${handle.url}`);
+    const url = handle.url;
+    console.log(`[ok] web console at ${url}`);
     console.log('press Ctrl-C to stop');
+    if (!noOpen) {
+      // Give the listener a moment to be ready before opening the browser.
+      setTimeout(() => openBrowser(url), 500);
+    }
     // keep alive until SIGINT
     await new Promise<void>((resolveExit) => {
       const stop = (): void => {
@@ -310,13 +403,13 @@ Usage:
   ima queue list                        List durable publish queue (.ima/queue)
   ima queue work [--limit N]            Run publish worker once (process due items)
   ima queue prune                       Remove dead-letter items from queue
-  ima web [--port N] [--host addr]      Start web console (default 127.0.0.1:5173)
+  ima web [--port N] [--host addr] [--no-open]  Start web console (default 127.0.0.1:5173; opens browser unless --no-open)
   ima help                              This help
 `);
 }
 
 if (process.argv[1] && import.meta.url === new URL(process.argv[1], 'file:').href) {
-  main().catch((e: Error) => {
+  runCli(process.argv.slice(2)).catch((e: Error) => {
     console.error(`[error] ${e.message}`);
     process.exit(1);
   });

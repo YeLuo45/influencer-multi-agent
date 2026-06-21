@@ -12,7 +12,8 @@
     "packages/cli"
   ],
   "engines": {
-    "node": ">=20.10.0"
+    "node": ">=20.10.0",
+    "npm": ">=10.0.0"
   },
   "scripts": {
     "build": "npm run build -w @ima/core && npm run build -w @ima/crawler && npm run build -w @ima/browser-mcp && npm run build -w @ima/publisher && npm run build -w @ima/cli",
@@ -20,10 +21,10 @@
     "test": "npm run test --workspaces --if-present",
     "coverage": "c8 --all --src packages/core/src --src packages/crawler/src --src packages/publisher/src --src packages/cli/src --include 'packages/**/src/**/*.ts' --exclude 'packages/**/dist/**' --exclude 'packages/**/test/**' --exclude 'packages/cli/src/*-smoke.ts' --exclude 'packages/cli/src/bootstrap-demo.ts' --exclude 'packages/cli/src/queue-worker-cli.ts' --exclude 'packages/**/src/index.ts' --statements 95 --branches 75 --functions 85 --lines 95 npm test",
     "bootstrap": "node --import tsx packages/cli/src/bootstrap-demo.ts",
-    "cli": "node --import tsx packages/cli/src/index.ts",
+    "cli": "node --import tsx packages/cli/src/cli-bin.ts",
     "mcp:http": "node --import tsx packages/browser-mcp/src/http-cli.ts",
     "mcp:stdio": "node --import tsx packages/browser-mcp/src/cli.ts",
-    "web": "node --import tsx packages/cli/src/index.ts web",
+    "web": "node --import tsx packages/cli/src/cli-bin.ts web",
     "clean": "rm -rf packages/*/dist .ima",
     "queue:work": "node --import tsx packages/cli/src/queue-worker-cli.ts"
   },

@@ -5,5 +5,5 @@
     "rootDir": "./src",
     "types": []
   },
-  "include": ["src/**/*.ts", "../../types/node-globals.d.ts"]
+  "include": ["src/**/*.ts", "../../types/node-globals.d.ts", "../../types/env.d.ts"]
 }

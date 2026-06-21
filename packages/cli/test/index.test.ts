@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { JsonStore, createContent, createQueueItem } from '@ima/core';
-import { parseWebOptions } from '../src/index.js';
+import { parseWebOptions, readNpmPassthroughArgs, openBrowser } from '../src/index.js';
 
 const repoRoot = join(import.meta.dirname, '../../..');
 const cliEntry = join(repoRoot, 'packages/cli/src/index.ts');
@@ -53,6 +53,79 @@ test('cli: web option parser gives argv precedence over npm_config_port', () => 
   const options = parseWebOptions(['web', '--port', '7778', '--host', '127.0.0.1'], { npm_config_port: '7777' });
   assert.equal(options.port, 7778);
   assert.equal(options.host, '127.0.0.1');
+});
+
+test('cli: web option parser rejects every Chromium restricted port', () => {
+  for (const port of [1, 7, 6665, 6666, 6667, 6668, 6669, 6697, 6000, 5060]) {
+    assert.throws(
+      () => parseWebOptions(['web', '--port', String(port)], {}),
+      new RegExp(`unsafe browser port: ${port}`),
+      `expected ${port} to be blocked`,
+    );
+  }
+  // sanity: a safe neighbour must not be blocked
+  const safe = parseWebOptions(['web', '--port', '6677'], {});
+  assert.equal(safe.port, 6677);
+});
+
+test('cli: readNpmPassthroughArgs resolves npm script aliases', () => {
+  // `web` keeps the alias so runCli still sees 'web' as argv[0]
+  assert.deepEqual(
+    readNpmPassthroughArgs({ npm_config_argv: '/usr/bin/npm run web --port 6677' }),
+    ['web', '--port', '6677'],
+  );
+  // `cli` is a generic dispatcher; userArgs[0] becomes the subcommand
+  assert.deepEqual(
+    readNpmPassthroughArgs({ npm_config_argv: '/usr/bin/npm run cli status c1' }),
+    ['status', 'c1'],
+  );
+  // `queue:work` maps to ['queue', 'work'] so the queue subselector stays at argv[1]
+  assert.deepEqual(
+    readNpmPassthroughArgs({ npm_config_argv: '/usr/bin/npm run queue:work --limit 1' }),
+    ['queue', 'work', '--limit', '1'],
+  );
+  // Unknown script alias returns userArgs only (script name is unknown)
+  assert.deepEqual(
+    readNpmPassthroughArgs({ npm_config_argv: '/usr/bin/npm run bootstrap' }),
+    [],
+  );
+  // No passthrough → empty
+  assert.deepEqual(readNpmPassthroughArgs({}), []);
+  assert.deepEqual(readNpmPassthroughArgs({ npm_config_argv: '' }), []);
+});
+
+test('cli: openBrowser uses platform-specific command and never throws', () => {
+  const calls: Array<{ cmd: string; args: string[] }> = [];
+  const fakeSpawn: typeof import('node:child_process').spawn = ((cmd: string, args: string[]) => {
+    calls.push({ cmd, args });
+    // Simulate the process exiting successfully; do not capture stdio.
+    const child = { on(_event: string, _cb: (...a: unknown[]) => void) { /* no-op */ }, unref() {} } as never;
+    return child;
+  }) as never;
+
+  // Force 'linux' to assert xdg-open path
+  const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
+  Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+  try {
+    openBrowser('http://127.0.0.1:6677', { spawn: fakeSpawn });
+    openBrowser('http://127.0.0.1:6677', { platform: 'darwin', spawn: fakeSpawn });
+    openBrowser('http://127.0.0.1:6677', { platform: 'win32', spawn: fakeSpawn });
+  } finally {
+    if (originalPlatform) Object.defineProperty(process, 'platform', originalPlatform);
+  }
+
+  assert.equal(calls.length, 3);
+  assert.deepEqual(calls[0], { cmd: 'xdg-open', args: ['http://127.0.0.1:6677'] });
+  assert.deepEqual(calls[1], { cmd: 'open', args: ['http://127.0.0.1:6677'] });
+  // Windows spawns through cmd.exe to handle `start`
+  assert.match(calls[2].cmd, /cmd(\.exe)?$/i);
+});
+
+test('cli: openBrowser swallows spawn failures (best-effort)', () => {
+  const fakeSpawn = (() => { throw new Error('no display'); }) as never;
+  assert.doesNotThrow(() =>
+    openBrowser('http://127.0.0.1:6677', { platform: 'linux', spawn: fakeSpawn }),
+  );
 });
 
 test('cli: help prints usage', () => {

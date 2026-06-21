@@ -211,6 +211,35 @@ declare module 'node:crypto' {
   export function randomUUID(): string;
 }
 
+declare module 'node:child_process' {
+  export interface ChildProcess {
+    on(event: 'exit', listener: (code: number | null, signal: NodeJS.Signals | null) => void): this;
+    on(event: 'error', listener: (err: Error) => void): this;
+    on(event: string, listener: (...args: unknown[]) => void): this;
+    kill(signal?: string): boolean;
+    unref(): void;
+    ref(): void;
+    pid?: number;
+    killed?: boolean;
+  }
+  export interface SpawnOptions {
+    cwd?: string;
+    env?: Record<string, string | undefined>;
+    stdio?: 'ignore' | 'pipe' | 'inherit' | Array<'ignore' | 'pipe' | 'inherit'>;
+    detached?: boolean;
+  }
+  export function spawn(
+    command: string,
+    args?: readonly string[],
+    options?: SpawnOptions,
+  ): ChildProcess;
+  export function spawnSync(
+    command: string,
+    args?: readonly string[],
+    options?: SpawnOptions,
+  ): { status: number | null; stdout: string; stderr: string; error?: Error };
+}
+
 declare module 'node:http' {
   import type { IncomingMessage, ServerResponse, Server } from 'node:http';
   export function createServer(handler: (req: IncomingMessage, res: ServerResponse) => void): Server;
