@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { JsonStore, createContent, createQueueItem } from '@ima/core';
+import { parseWebOptions } from '../src/index.js';
 
 const repoRoot = join(import.meta.dirname, '../../..');
 const cliEntry = join(repoRoot, 'packages/cli/src/index.ts');
@@ -34,6 +35,25 @@ async function seedContent(root: string, id = 'seed'): Promise<void> {
   ];
   await store.write(`content/${id}.json`, content);
 }
+
+test('cli: web option parser accepts npm run web --port without -- separator', () => {
+  const options = parseWebOptions(['web', '7777'], { npm_config_port: 'true', npm_config_host: '0.0.0.0' });
+  assert.equal(options.port, 7777);
+  assert.equal(options.host, '0.0.0.0');
+});
+
+test('cli: web option parser rejects browser unsafe port 6666', () => {
+  assert.throws(
+    () => parseWebOptions(['web', '--port', '6666'], {}),
+    /unsafe browser port: 6666/,
+  );
+});
+
+test('cli: web option parser gives argv precedence over npm_config_port', () => {
+  const options = parseWebOptions(['web', '--port', '7778', '--host', '127.0.0.1'], { npm_config_port: '7777' });
+  assert.equal(options.port, 7778);
+  assert.equal(options.host, '127.0.0.1');
+});
 
 test('cli: help prints usage', () => {
   const root = mkdtempSync(join(tmpdir(), 'ima-cli-index-help-'));

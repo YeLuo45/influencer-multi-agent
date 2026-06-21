@@ -3,6 +3,35 @@ import { Pipeline, buildAbReport } from '@ima/core';
 import { PublishWorker, summarizeQueue } from './queue-worker.js';
 import { startWebServer } from './web-server.js';
 
+export interface WebOptions {
+  port: number;
+  host: string;
+}
+
+const BROWSER_UNSAFE_PORTS = new Set([6666]);
+
+function valueAfterFlag(argv: string[], flag: string): string | undefined {
+  const index = argv.indexOf(flag);
+  return index >= 0 ? argv[index + 1] : undefined;
+}
+
+export function parseWebOptions(argv: string[], env: Record<string, string | undefined> = process.env as Record<string, string | undefined>): WebOptions {
+  const argvPort = valueAfterFlag(argv, '--port');
+  const positionalPort = argv[1] && !argv[1].startsWith('-') ? argv[1] : undefined;
+  const envPort = env.npm_config_port && env.npm_config_port !== 'true' ? env.npm_config_port : undefined;
+  const portInput = argvPort ?? positionalPort ?? envPort;
+  const port = Number(portInput ?? 5173);
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+    throw new Error(`invalid port: ${portInput ?? ''}`);
+  }
+  if (BROWSER_UNSAFE_PORTS.has(port)) {
+    throw new Error(`unsafe browser port: ${port}. Chromium/Edge blocks this port; use 6677 or 7777 instead.`);
+  }
+
+  const host = valueAfterFlag(argv, '--host') ?? env.npm_config_host ?? '127.0.0.1';
+  return { port, host };
+}
+
 async function main(): Promise<void> {
   const app = createApp();
   const argv = process.argv.slice(2);
@@ -202,9 +231,7 @@ async function main(): Promise<void> {
   }
 
   if (cmd === 'web') {
-    const portArg = argv.indexOf('--port');
-    const port = portArg >= 0 ? Number(argv[portArg + 1]) : 5173;
-    const host = argv.indexOf('--host') >= 0 ? argv[argv.indexOf('--host') + 1] : '127.0.0.1';
+    const { port, host } = parseWebOptions(argv);
     const handle = await startWebServer({ store: app.store, host, port, now: app.now });
     console.log(`[ok] web console at ${handle.url}`);
     console.log('press Ctrl-C to stop');
@@ -288,7 +315,9 @@ Usage:
 `);
 }
 
-main().catch((e: Error) => {
-  console.error(`[error] ${e.message}`);
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === new URL(process.argv[1], 'file:').href) {
+  main().catch((e: Error) => {
+    console.error(`[error] ${e.message}`);
+    process.exit(1);
+  });
+}
