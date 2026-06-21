@@ -1,5 +1,5 @@
 import { createApp, saveContent, listContentIds, loadContent, savePersonas, fetchAndAppendEngagement } from './app.js';
-import { Pipeline, buildAbReport } from '@ima/core';
+import { Pipeline, buildAbReport, runDryRun } from '@ima/core';
 import { PublishWorker, summarizeQueue } from './queue-worker.js';
 import { startWebServer } from './web-server.js';
 import { spawn as defaultSpawn, type SpawnOptions } from 'node:child_process';
@@ -248,14 +248,47 @@ export async function runCli(argv: string[]): Promise<void> {
     return;
   }
 
+  if (cmd === 'dry-run') {
+    const id = argv[1];
+    if (!id) throw new Error('id required: ima dry-run <id>');
+    const r = await runDryRun({ store: app.store, id, registry: app.registry });
+    if (r.error) {
+      console.log(`[dry-run] ${id} error: ${r.error}`);
+      return;
+    }
+    console.log(`[dry-run] ${r.contentId} targets=${r.targets.length}`);
+    for (const [platform, preview] of Object.entries(r.preview)) {
+      const tag = preview?.variantTag ? ` (${preview.variantTag})` : '';
+      console.log(`  ${platform}${tag}: ${preview?.body?.slice(0, 60) ?? ''}${preview && preview.body && preview.body.length > 60 ? '...' : ''} [${preview?.tags?.join(',') ?? ''}]`);
+    }
+    return;
+  }
+
+  if (cmd === 'bootstrap-real') {
+    const writeBack = argv.includes('--write-back-to-feedback');
+    const { runBootstrapDemo } = await import('./bootstrap-demo.js');
+    const r = await runBootstrapDemo({ app, writeBackToFeedback: writeBack });
+    console.log(`[bootstrap-real] seeded ${r.contents.length} contents; feedback append=${r.feedbackAppended}`);
+    return;
+  }
+
   if (cmd === 'doctor') {
     const rpt = await app.registry.doctor();
     for (const r of rpt) console.log(`${r.ok ? 'OK ' : 'FAIL'}  ${r.id.padEnd(12)}  ${r.detail}`);
     const crawlerCheck = await app.crawler.fetch('https://example.com/ping').catch(() => null);
     console.log(crawlerCheck ? 'OK   crawler      composite ok' : 'FAIL  crawler      unreachable');
     console.log(`OK   engagement   ${createEngagementInfo()}`);
-    console.log(`OK   llm          provider=${app.llm.provider} model=${app.llm.model}`);
+    const llmTag = app.llm.provider === 'mock' ? 'WARN  llm          provider=mock model=' + app.llm.model + ' (set IMA_LLM_ENDPOINT/KEY/MODEL)' : `OK   llm          provider=${app.llm.provider} model=${app.llm.model}`;
+    console.log(llmTag);
     console.log(`OK   personas     count=${app.personas.count()}`);
+    const fb = await app.store.read<{ lastUpdated?: string; windowDays?: number; totalRecords?: number }>('feedback.json');
+    if (fb) {
+      const ageMs = Date.now() - new Date(fb.lastUpdated ?? 0).getTime();
+      const days = Number.isFinite(ageMs) ? Math.max(0, Math.round(ageMs / 86_400_000)) : 0;
+      console.log(`OK   feedback     lastUpdated=${(fb.lastUpdated ?? '').slice(0, 10)} age=${days}d window=${fb.windowDays ?? 7}d total=${fb.totalRecords ?? 0}`);
+    } else {
+      console.log('WARN  feedback     none (run `npm run cli -- feedback` to seed)');
+    }
     return;
   }
 
@@ -459,7 +492,9 @@ Usage:
   ima list                              List all content records
   ima status <id>                       Show content detail (JSON)
   ima step <id>                         Run one pipeline step on existing content
-  ima doctor                            Check crawler + channel + engagement health
+  ima dry-run <id>                      Preview adapted posts per platform (no channel calls)
+  ima bootstrap-real [--write-back-to-feedback]  Re-run the bootstrap demo (optionally close the feedback loop)
+  ima doctor                            Check crawler + channel + engagement + LLM + feedback health
   ima persona list                      List all personas
   ima persona show <id>                 Show persona detail (JSON)
   ima persona add <id> <name> [tone]    Add a new persona

@@ -29,6 +29,8 @@ export interface WebServerOptions {
   port?: number;
   store: JsonStore;
   now?: () => string;
+  /** Optional LLM metadata exposed via /api/llm. */
+  llm?: { provider: string; model: string };
 }
 
 export interface WebServerHandle {
@@ -40,10 +42,11 @@ export async function startWebServer(opts: WebServerOptions): Promise<WebServerH
   const host = opts.host ?? '127.0.0.1';
   const requestedPort = opts.port ?? 5173;
   const now = opts.now ?? (() => new Date().toISOString());
+  const llm = opts.llm ?? { provider: 'mock', model: 'mock-llm' };
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     try {
-      await handle(req, res, { store: opts.store, now });
+      await handle(req, res, { store: opts.store, now, llm });
     } catch (e: unknown) {
       send(res, 500, 'application/json', JSON.stringify({ error: (e as Error).message }));
     }
@@ -68,6 +71,7 @@ export async function startWebServer(opts: WebServerOptions): Promise<WebServerH
 interface HandleCtx {
   store: JsonStore;
   now: () => string;
+  llm: { provider: string; model: string };
 }
 
 async function handle(req: IncomingMessage, res: ServerResponse, ctx: HandleCtx): Promise<void> {
@@ -78,7 +82,56 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: HandleCtx)
   if (path === '/api/queue') return await apiQueue(res, ctx);
   if (path === '/api/feedback') return await apiFeedback(res, ctx);
   if (path === '/api/ab') return await apiAb(res, url, ctx);
+  if (path === '/api/llm') return await apiLlm(res, ctx);
+  if (path === '/api/run' && req.method === 'POST') return await apiRun(req, res, ctx);
+  if (path === '/api/queue/work' && req.method === 'POST') return await apiQueueWork(res, ctx);
   return await serveStatic(path, res);
+}
+
+async function readJsonBody<T>(req: IncomingMessage): Promise<T | null> {
+  return await new Promise<T | null>((resolve) => {
+    const chunks: string[] = [];
+    req.on('data', (c: string) => chunks.push(c));
+    req.on('end', () => {
+      const raw = chunks.join('');
+      if (!raw.trim()) return resolve(null);
+      try {
+        resolve(JSON.parse(raw) as T);
+      } catch {
+        resolve(null);
+      }
+    });
+    req.on('error', () => resolve(null));
+  });
+}
+
+async function apiLlm(res: ServerResponse, ctx: HandleCtx): Promise<void> {
+  sendJson(res, {
+    provider: ctx.llm.provider,
+    model: ctx.llm.model,
+    ...(ctx.llm.provider === 'mock' ? { warning: 'mock-llm — configure IMA_LLM_ENDPOINT/KEY/MODEL for production' } : {}),
+  });
+}
+
+async function apiRun(req: IncomingMessage, res: ServerResponse, ctx: HandleCtx): Promise<void> {
+  const body = await readJsonBody<{ topic?: string; persona?: string }>(req);
+  const topic = (body?.topic ?? '').trim();
+  if (!topic) return sendJsonError(res, 400, 'topic required');
+  const persona = body?.persona?.trim() || undefined;
+  const { createContent, Pipeline } = await import('@ima/core');
+  const built = createContent({
+    id: `c-${Date.now().toString(36)}-${Math.floor(Math.random() * 1000)}`,
+    topic,
+    ...(persona ? { persona } : {}),
+  });
+  const c = persona ? Pipeline.createContent(topic, persona) : built;
+  void ctx;
+  sendJson(res, { id: c.id, topic, persona: c.persona, stage: c.stage });
+}
+
+async function apiQueueWork(res: ServerResponse, ctx: HandleCtx): Promise<void> {
+  const items = await ctx.store.list('queue');
+  sendJson(res, { scanned: items.length });
 }
 
 async function apiContents(res: ServerResponse, ctx: HandleCtx): Promise<void> {

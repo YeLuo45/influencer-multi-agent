@@ -38,6 +38,10 @@ declare function clearTimeout(handle: NodeJS.Timeout | undefined): void;
 declare module 'http' {
   export interface IncomingMessage {
     url?: string;
+    method?: string;
+    on(event: 'data', cb: (chunk: string) => void): void;
+    on(event: 'end', cb: () => void): void;
+    on(event: 'error', cb: (err: Error) => void): void;
   }
   export interface ServerResponse {
     writeHead(status: number, headers?: Record<string, string>): void;

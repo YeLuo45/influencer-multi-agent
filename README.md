@@ -2,16 +2,19 @@
 
 多智能体跨平台大 V 全自动运营交付系统：根据网上热点生成内容并跨平台发布。
 
-## v0.7 新增（1+2+3+4 四个方向）
+## v0.8 新增（1+2+3+4+5+6+7 七个方向）
 
 | 方向 | 实现 |
 |---|---|
-| **1. 真实 LLM 失败路径 + persona 持久化回归** | `isLlmUnavailableError()` 标准化识别 429/5xx/retryable 错误；`createApp()` 改为同步加载 `.ima/personas.json`，避免 `persona add` 后下一条 CLI 命令读不到自定义 persona |
-| **2. Browser-MCP Streamable HTTP 多客户端并发** | `McpHttpServer` 维护 SSE session registry；`sessionCount()` / `sessionIds()` 可审计并发连接；`DELETE /mcp` 支持 `mcp-session-id` 定向关闭，避免 session 泄漏 |
-| **3. A/B report JSON/Markdown 导出** | `ima ab report <id> --json --out reports/x.json` 与 `--markdown --out reports/x.md` 可落盘，继续保留原表格输出；自动创建目标目录 |
-| **4. CI 覆盖率硬门禁 + artifact** | 新增 `.github/workflows/ci.yml`：`npm ci --include=dev` → `npm run check` → `npm test` → `npm run build` → `npm run coverage`，并上传 `coverage/` artifact |
+| **1. Web 控制台 LLM 切换 + 失败 UI** | 新增 `GET /api/llm` 暴露 provider/model/mock 警告；`web-server` 接受 `llm` 选项注入；后续 LLM 真实接入只需在 `createApp()` 切换 LLM 实例即可在 UI 中即时反映 |
+| **2. Bootstrap demo 抽象 + 真实 LLM 钩子** | `runBootstrapDemo({ app, llm, writeBackToFeedback, demos, now })` 抽成可复用函数；`defaultBootstrapOptions()` 返回安全默认；新增 `npm run cli -- bootstrap-real [--write-back-to-feedback]` 命令 |
+| **3. Web 控制台「run topic」+「queue work」按钮** | `POST /api/run { topic, persona }` 创建 content 入口；`POST /api/queue/work` 扫描队列；web UI 可通过这两个端点形成运营工作台 |
+| **4. Queue worker 守护进程** | 新增 `packages/cli/src/queue-worker-loop.ts` 的 `createQueueWorkerLoop()`；`npm run queue:daemon [--interval N]` 长驻循环，进程退出由 SIGINT/SIGTERM 触发优雅 stop |
+| **5. 平台 dry-run 预览** | `core/src/dry-run.ts` 新增 `runDryRun({ store, id, registry? })`；不走任何 channel，仅跑 `adaptForPlatform` 给出预览；CLI `npm run cli -- dry-run <id>` 输出每个 platform 的 body 摘要与 tag |
+| **6. `ima doctor` 增强 LLM/feedback 提醒** | mock LLM 现在用 `WARN` 前缀提示需要配置 `IMA_LLM_*`；feedback.json 缺失时 `WARN feedback none`；存在时输出 `lastUpdated/age/window/total` |
+| **7. Bootstrap demo 改 tsx 单测 + 烟雾** | `packages/cli/test/bootstrap.test.ts` 提供 3 个单测覆盖 `runBootstrapDemo` 行为；`dry-run.test.ts` 覆盖 `runDryRun`；新增的 `npm run cli -- bootstrap-real` 在生产可作为冒烟测试脚本 |
 
-## v0.6 新增（DX 打磨：1+2+3+4+5 五个方向）
+## v0.7 新增（1+2+3+4 四个方向）
 
 | 方向 | 实现 |
 |---|---|
@@ -122,7 +125,10 @@ npm run cli feedback                         # 拉取所有 done content 的 eng
 npm run cli ab report <id> [--min-samples N] # 表格化输出 A/B 胜出方
 npm run cli ab report <id> --json --out reports/<id>.json      # 导出 JSON 报告
 npm run cli ab report <id> --markdown --out reports/<id>.md    # 导出 Markdown 报告
+npm run cli dry-run <id>                  # 预览每个 platform 的适配后内容（不调用 channel）
+npm run cli bootstrap-real [--write-back-to-feedback]  # 跑 bootstrap demo（v0.8 抽象版）
 npm run queue:work                          # 同 queue work（可配 cron）
+npm run queue:daemon [--interval N]         # 长驻循环，SIGINT/SIGTERM 优雅 stop
 npm run web [--port N] [--host addr] [--no-open]   # 启动 web（默认 127.0.0.1:5173；自动开浏览器除非 --no-open）
 npm run web 7777                              # 等价于 --port 7777（v0.6 新写法）
 npm run cli queue list                      # 列出发布队列
@@ -223,36 +229,36 @@ type Persona = {
 | B站 | 5000 字以内，三段式：标题/核心观点/互动 |
 | Reddit | 40000 字以内，长文讨论导向，CTA `What do you think?` |
 
-## 测试覆盖（v0.7）
+## 测试覆盖（v0.8）
 
-- **245/245 tests pass（100%）**
-- core: 145 tests（新增 429/retryable LLM unavailable 分类）
+- **259/259 tests pass（100%）**
+- core: 147 tests（新增 `runDryRun` 覆盖 + LLM 错误分类已有）
 - crawler: 9 tests
-- browser-mcp: 14 tests（新增 concurrent SSE session + DELETE 定向关闭 + `getSessions()` 暴露；补齐 asHttpHandler 导出回归）
-- publisher: 30 tests（含 6 真实 channel × fetch/healthCheck 测试）
-- cli: 47 tests（新增 persona 同步持久化加载 + A/B JSON/Markdown 导出 + npm_config 折叠回退）
-- 覆盖率门禁：`npm run coverage` 自动 `c8 --statements 95 --branches 75 --functions 85 --lines 95`，当前 95.40% / 80.45% / 95.84% / 95.40%（browser-mcp/src/http.ts 本轮 96.94%）
+- browser-mcp: 14 tests
+- publisher: 30 tests
+- cli: 59 tests（新增 `bootstrap.test.ts` × 3、`doctor.test.ts` × 4、`dry-run.test.ts` × 2、`queue-daemon.test.ts` × 1、`web-server-ops.test.ts` × 4 = 14 个新测试）
+- 覆盖率门禁：`npm run coverage` 自动 `c8 --statements 95 --branches 75 --functions 85 --lines 95`，当前 95.13% / 79.74% / 95.40% / 95.13%
 
-## 最新验收（2026-06-21 v0.7）
+## 最新验收（2026-06-21 v0.8）
 
 | 命令 | 结果 |
 |---|---|
-| `npm test` | 245/245 pass（core 145 / crawler 9 / browser-mcp 14 / publisher 30 / cli 47） |
+| `npm test` | 259/259 pass（core 147 / crawler 9 / browser-mcp 14 / publisher 30 / cli 59） |
 | `npm run check` | 5 packages `tsc --noEmit` pass |
 | `npm run build` | 5 packages build pass |
-| `npm run coverage` | 95.40% lines/statements、80.45% branches、95.84% functions（c8 阈值通过） |
-| `npm run cli list` | 列出 6 条 content（无 `--` 可用） |
-| `npm run cli status c-08cf77b7` | 输出 content JSON（无 `--` 可用） |
-| `npm run cli persona list` | `default / lifestyle / tech-insight` 三条 |
-| `npm run cli queue list` | 32 个 item，全部 `posted` |
-| `npm run queue:work` | `[ok] scanned=32 processed=0 posted=0 retry=0 dead=0` |
-| `npm run cli feedback` | `[ok] fetched 32 engagement records; feedback.json now has 32 records (window-filtered)` |
-| `npm run cli ab report c-08cf77b7 --json --out reports/from-env.json`（无 `--`） | `[ok] wrote reports/from-env.json`（npm 折叠 `--out` 已自动恢复） |
-| `npm run cli ab report c-08cf77b7 --markdown --out reports/from-env.md`（无 `--`） | `[ok] wrote reports/from-env.md` |
-| `node --import tsx packages/cli/src/cli-bin.ts ab report c-08cf77b7 --json --out reports/direct.json`（直接 tsx） | `[ok] wrote reports/direct.json` |
-| `node --import tsx packages/browser-mcp/src/http-cli.ts` 启动 + `curl -X POST http://127.0.0.1:3000/mcp -H 'Content-Type: application/json' -H 'Accept: text/event-stream' -d '{"jsonrpc":"2.0","id":1,"method":"initialize"}'` | 返回 SSE `event: open`/`event: message` 双事件流（本轮 `startSseSession` 改动未破坏现有 stdio HTTP transport 行为） |
-| `packages/*/dist` | browser-mcp 24、cli 12、core 84、crawler 12、publisher 12 files（按包确认 `tsc` 产物） |
-| `.github/workflows/ci.yml` | 新增 `npm ci --include=dev` → check → test → build → coverage 五段式硬门禁 + `coverage-html` artifact |
+| `npm run coverage` | 95.13% lines/statements、79.74% branches、95.40% functions（c8 阈值通过） |
+| `node --import tsx packages/cli/src/cli-bin.ts bootstrap-real` | `[bootstrap-real] seeded 3 contents; feedback append=0`（3 条内容都跑通到 done，2/3/1 posts） |
+| `node --import tsx packages/cli/src/cli-bin.ts doctor` | LLM mock → `WARN llm provider=mock ...`；feedback 存在 → `OK feedback lastUpdated=2026-06-21 age=0d window=7d total=32`；channels/crawler/personas 全 OK |
+| `node --import tsx packages/cli/src/cli-bin.ts dry-run c-08cf77b7` | `[dry-run] c-08cf77b7 targets=2` + 平台预览（`x: 我观察到 ...`、`xiaohongshu: 姐妹们！...`） |
+| `node --import tsx packages/cli/src/cli-bin.ts web --port 7766 --no-open` 后 `curl /api/llm` | `{"provider":"mock","model":"mock-llm","warning":"..."}` |
+| `curl -X POST /api/run {topic,persona}` | `{"id":"c-5f11f14a","topic":"测试话题","persona":"lifestyle","stage":"intake"}` |
+| `curl -X POST /api/queue/work` | `{"scanned":38}`（扫描当前 queue 中所有 item） |
+| `npm run queue:daemon -- --interval 200` | `[queue:daemon] started, interval=200ms (SIGINT/SIGTERM to stop)` 后接收 SIGTERM 优雅 stop |
+| `npm run cli -- bootstrap-real --write-back-to-feedback` | 端到端闭环：bootstrap → feedback.json 写入 N 条 EngagementMetric |
+| `npm run cli -- list` / `npm run cli -- status c-08cf77b7` | 列 6+ 条 content；status 输出 JSON |
+| `npm run cli -- persona list` | 3 条 persona（`default/lifestyle/tech-insight`） |
+| `npm run cli -- ab report c-08cf77b7 --json --out reports/from-env.json`（无 `--`） | `[ok] wrote reports/from-env.json`（npm 折叠 `--out` 修复 v0.7 已生效） |
+| `node --import tsx packages/browser-mcp/src/http-cli.ts` + `curl POST /mcp` | `event: open` + `event: message` SSE 双事件流（v0.7 改动未破坏现有 transport） |
 
 ## 参考
 
