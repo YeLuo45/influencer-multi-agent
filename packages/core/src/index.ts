@@ -11,4 +11,6 @@ export * from './persona.js';
 export * from './platform-adapter.js';
 export * from './feedback-store.js';
 export * from './publish-queue.js';
-export { ResearchAgent, IdeaAgent, DraftAgent, ReviewAgent, ScheduleAgent, PublishAgent, AuditAgent } from './agents/index.js';
+export * from './translate.js';
+export * from './ab-test.js';
+export { ResearchAgent, IdeaAgent, DraftAgent, ReviewAgent, ScheduleAgent, PublishAgent, AuditAgent, TranslateAgent, PLATFORM_LOCALE } from './agents/index.js';

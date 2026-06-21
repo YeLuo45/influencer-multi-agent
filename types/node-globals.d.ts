@@ -29,6 +29,46 @@ declare const console: {
   debug(...args: unknown[]): void;
 };
 
+declare function setTimeout(cb: () => void, ms?: number): NodeJS.Timeout;
+declare function clearTimeout(handle: NodeJS.Timeout | undefined): void;
+
+// Minimal Node.js http / fs / path / url typing for the web console server.
+// We only declare the surface we actually use.
+
+declare module 'http' {
+  export interface IncomingMessage {
+    url?: string;
+  }
+  export interface ServerResponse {
+    writeHead(status: number, headers?: Record<string, string>): void;
+    end(body?: string | Uint8Array): void;
+  }
+  export function createServer(handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void>): {
+    listen(port: number, host: string, cb: () => void): void;
+    close(cb?: (err?: Error) => void): void;
+    once(event: 'error', cb: (err: Error) => void): void;
+    address(): { port: number } | null;
+  };
+}
+
+declare module 'fs' {
+  export function readFile(path: string): Promise<Buffer>;
+  export function readFileSync(path: string): Buffer;
+  export function readFileSync(path: string, encoding: 'utf-8'): string;
+  export function existsSync(path: string): boolean;
+  export function readdirSync(path: string): string[];
+}
+
+declare module 'path' {
+  export function join(...parts: string[]): string;
+  export function dirname(p: string): string;
+  export function resolve(...parts: string[]): string;
+}
+
+declare module 'url' {
+  export function fileURLToPath(url: string): string;
+}
+
 type AnyBuffer = { toString(encoding?: string): string };
 declare const Buffer: {
   isBuffer(obj: unknown): obj is AnyBuffer;

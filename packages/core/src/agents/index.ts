@@ -5,3 +5,4 @@ export { ReviewAgent } from './review.js';
 export { ScheduleAgent } from './schedule.js';
 export { PublishAgent } from './publish.js';
 export { AuditAgent } from './audit.js';
+export { TranslateAgent, PLATFORM_LOCALE } from './translate.js';

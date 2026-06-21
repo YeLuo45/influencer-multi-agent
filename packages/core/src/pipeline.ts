@@ -11,7 +11,9 @@ import {
   ScheduleAgent,
   PublishAgent,
   AuditAgent,
+  TranslateAgent,
 } from './agents/index.js';
+import type { Locale } from './translate.js';
 import type { Persona } from './persona.js';
 
 export interface PipelineOptions {
@@ -19,14 +21,27 @@ export interface PipelineOptions {
   ideaCount?: number;
   feedback?: EngagementMetric[];
   personaLookup?: (id: string) => Persona | null;
+  /**
+   * When true, run TranslateAgent between draft and review. Each pipeline
+   * will translate into `translateTargets` (default: ['en', 'ja']) and apply
+   * the result to `draft.translations` + `draft.platformOverrides`.
+   */
+  translateTargets?: Locale[];
+  /**
+   * Number of A/B variants to tag ideas with (round-robin). Set to 1 to keep
+   * the legacy single-variant pipeline; set to 2+ to enable A/B testing.
+   */
+  variantCount?: number;
 }
 
 const DEFAULT_MAX_REVISIONS = 3;
+const DEFAULT_VARIANT_COUNT = 1;
 
 export class Pipeline {
   private readonly research = new ResearchAgent();
   private readonly idea = new IdeaAgent();
   private readonly draft = new DraftAgent();
+  private readonly translate = new TranslateAgent();
   private readonly review = new ReviewAgent();
   private readonly schedule = new ScheduleAgent();
   private readonly publish = new PublishAgent();
@@ -35,12 +50,16 @@ export class Pipeline {
   private readonly ideaCount: number;
   private readonly feedback: EngagementMetric[];
   private readonly personaLookup: (id: string) => Persona | null;
+  private readonly translateTargets: Locale[] | null;
+  private readonly variantCount: number;
 
   constructor(private readonly ctx: AgentContext, opts: PipelineOptions = {}) {
     this.maxRevisions = opts.maxRevisionRounds ?? DEFAULT_MAX_REVISIONS;
     this.ideaCount = opts.ideaCount ?? 5;
     this.feedback = opts.feedback ?? [];
     this.personaLookup = opts.personaLookup ?? (() => null);
+    this.translateTargets = opts.translateTargets ?? null;
+    this.variantCount = opts.variantCount ?? DEFAULT_VARIANT_COUNT;
   }
 
   static createContent(topic: string, persona?: string): Content {
@@ -78,16 +97,32 @@ export class Pipeline {
       }
       case 'ideas': {
         const r = await this.idea.run(
-          { count: this.ideaCount, feedback: this.feedback, persona },
+          { count: this.ideaCount, feedback: this.feedback, persona, variantCount: this.variantCount },
           content,
           this.ctx,
         );
         if (r.kind !== 'ok') return { ok: false };
-        return this.applyOk(content, 'draft', 'idea', `generated ${r.data.length} ideas`, (c) => ({ ...c, ideas: r.data }));
+        return this.applyOk(content, 'draft', 'idea', `generated ${r.data.length} ideas${this.variantCount > 1 ? ` (A/B=${this.variantCount})` : ''}`, (c) => ({ ...c, ideas: r.data }));
       }
       case 'draft': {
         const r = await this.draft.run({ ideaIndex: 0, persona }, content, this.ctx);
         if (r.kind !== 'ok') return { ok: false };
+        if (this.translateTargets && this.translateTargets.length > 0) {
+          const tr = await this.translate.run(
+            { targets: this.translateTargets, applyToOverrides: true },
+            { ...content, draft: r.data },
+            this.ctx,
+          );
+          if (tr.kind === 'ok') {
+            return this.applyOk(
+              TranslateAgent.attachTo({ ...content, draft: r.data }, tr.data, true),
+              'review',
+              'translate',
+              `translated into ${tr.data.entries.map((e) => e.locale).join('+')}`,
+              (c) => ({ ...c, draft: c.draft }),
+            );
+          }
+        }
         return this.applyOk(content, 'review', 'draft', `drafted: ${r.data.title}`, (c) => ({ ...c, draft: r.data }));
       }
       case 'review': {

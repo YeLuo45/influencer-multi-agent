@@ -197,6 +197,49 @@ CLI 命令：
 
 `@ima/core/publish-queue.ts` 是状态机 + 纯函数层；`@ima/cli/queue-store.ts` 持久化到 `.ima/queue/<id>.json`；`@ima/cli/queue-worker.ts` 周期拉快照 + 调 `processQueue` 重试 due 项。
 
+## 12.5 multi-locale translate (v0.5 新增)
+
+`TranslateAgent` 在 draft 和 review 之间调用 `translateContent(llm, { sourceBody, sourceLocale: 'zh', targets })`。结果落到 `Draft.translations`（按 locale 索引），同时按 `PLATFORM_LOCALE` 写 `platformOverrides[platform] = entry.body`，使 `PublishAgent` 在 deriveTargets 阶段拿到正确的本地化 body。
+
+关键约束：
+- 三个 locale：`zh` / `en` / `ja`（`SUPPORTED_LOCALES`）
+- `MockLlm` 已有 `translate to english` / `translate to japanese` 关键词路由；真实 LLM 由 prompt 驱动
+- LLM 失败或 body 为空 → fallback 到 source body 并记录在 `TranslationResult.fellBackToSource`
+- `PLATFORM_LOCALE`: x/reddit → en; xiaohongshu/weibo/bilibili → zh
+
+## 12.6 A/B testing（v0.5 新增）
+
+`ab-test.ts` 提供：
+- `assignVariantTags(items, variantCount)`：round-robin 分配 A/B/C/D/E tag
+- `aggregateByVariant(posts, metrics)`：按 variant 聚合 engagement（`c*3 + s*2 + l + 0.05*v` 加权 score）
+- `selectWinner(variants, { minSampleSize, tieMargin })`：选胜出方，少于 minSampleSize 或 tie 内返回 null
+- `buildAbReport(contentId, posts, metrics, opts)`：完整报告
+
+数据流：
+1. `Pipeline({ variantCount: 2 })` → `IdeaAgent` 给每条 idea 加 `variantTag: 'A'|'B'`
+2. `PublishAgent.deriveTargets` 把 idea 的 tag 透传到 `PostRecord.variantTag`
+3. `feedback` CLI 拉取 metrics 时如果源 post 已有 tag，metrics 继承
+4. `ima ab report <id>` 调用 `buildAbReport` 输出表格 + winner
+
+## 12.7 web console（v0.5 新增）
+
+`apps/web/`（零 build）：纯 HTML + CSS + 原生 JS。CLI 启动 `web-server.ts` Node stdlib HTTP server：
+
+```
+GET  /                apps/web/index.html
+GET  /style.css        apps/web/style.css
+GET  /app.js           apps/web/app.js
+GET  /api/contents     Content summary list
+GET  /api/queue        { summary, items } for .ima/queue
+GET  /api/feedback     window-filtered feedback summary
+GET  /api/ab?id=...    AbReport
+```
+
+约束：
+- `types: []` 在 tsconfig.base.json 排除了原生 @types/node；`types/node-globals.d.ts` 提供 `http/fs/path/url` 的最小 stub（声明 function signature，runtime 仍用 node 自带）
+- web 静态目录路径：`web-server.ts` 在 `packages/cli/src/`，相对路径 `../../../../apps/web` 才能到 monorepo 根
+- 端口 0 时 server 报告真实 chosen port（用 `server.address()`）
+
 `QueueItem` 状态机：
 ```
 pending ─► posting ─► posted           (terminal success)
@@ -240,15 +283,28 @@ CLI 命令：
 ## 14. 不做什么（v0.4 边界）
 
 - 不接真实社媒 API（5 个 channel 都是 deterministic stub）
-- 不做实时评论自动回复（v0.5+）
-- 不做自动 A/B 实验（v0.5+）
+- 不做实时评论自动回复（v0.6+）
+- 不做自动 A/B 实验（v0.6+）
 
-## 15. 后续迭代方向（v0.5+）
+## 15. 后续迭代方向（v0.6+）
 
-1. **多语言自动翻译** — 中/英/日自动翻译并按平台分发（TranslateAgent）
-2. **A/B 实验闭环** — IdeaAgent 同主题多 hook，发布携带 variantTag，`feedback` 按 variant 聚合
-3. **Web 控制面板** — Vite + React SPA，调用 HTTP MCP server
-4. **真实 channel 接入** — X/Twitter API + XHS web 登录态
-5. **评论自动回复** — AuditAgent 周期性抓 `engagement.comments[]`，让 DraftAgent 生成 ≤140 字回复
-6. **scheduler worker** — 取代 publish 阶段同步 post，改为 `ScheduleAgent` 仅算时间戳，post 由 worker 异步处理
-7. **per-content concurrency guard** — 同一 content 的多 platform worker 跑在并行任务上（`Promise.all`）
+1. **真实 channel 接入** — X/Twitter API + XHS web 登录态
+2. **评论自动回复** — AuditAgent 周期性抓 `engagement.comments[]`，让 DraftAgent 生成 ≤140 字回复（适配 X/微博）
+3. **scheduler worker** — 取代 publish 阶段同步 post，发布时机由 worker 异步处理
+4. **per-content concurrency guard** — 同一 content 的多 platform worker 跑在并行任务上（`Promise.all`）
+5. **Web UI 多语言切换** — 同步 i18n 框架，让 zh/en 切换不只改 `document.documentElement.lang`
+6. **Web UI 实时推送** — `EventSource` 订阅 `.ima/queue/` 变更，dashboard 自动刷新
+7. **Per-channel rate limiting** — 真实 channel 接入后，worker 按 platform 节流
+8. **LLM token budget tracking** — `feedback-store` 扩 token 字段，按日聚合
+9. **A/B 显著性检验** — 给 `selectWinner` 加 z-test / chi-square
+10. **E2E test harness** — 在 CI 跑 `bootstrap` + `feedback` + `ab report` 端到端
+
+## 16. 决策日志（v0.4 - v0.5）
+
+- v0.4 publish queue：选状态机 + 指数退避 + worker 纯函数（input snapshot → output items），由 CLI 端 `QueueStore` 持久化；agent 不知道有盘文件存在。
+- v0.4 sink 失败隔离：PublishAgent 用 `safeSink` 包裹任何 sink 异常，post 失败仍按原路径上报。
+- v0.5 translate：选 `core/src/translate.ts` 纯函数层 + agent shell，保持 Agent 接口纯。
+- v0.5 A/B：选 `variantCount` 选项 + round-robin 分配 + `PLATFORM_LOCALE` 透传，避免新增 agent。
+- v0.5 web：选 `apps/web/` 零 build + Node stdlib HTTP server，不引 vite/react，规避 WSL 离线 + 拖慢 build 风险。
+- v0.5 web 路由：`web-server.ts` 用 `import.meta.url` + `path.resolve` 解析 `apps/web/`，3 个 `..` 跳到 monorepo 根。
+- v0.5 web 类型：项目 `types: []` 排除原生 @types/node；用 `types/node-globals.d.ts` 补 `http/fs/path/url` 最小 stub（仅声明类型签名，runtime 仍用 node 自带）。

@@ -56,6 +56,7 @@ export function createApp(): AppContext {
       maxRevisionRounds: 2,
       feedback,
       personaLookup: (id) => personas.get(id),
+      translateTargets: ['en', 'ja'],
     },
   );
   return { store, llm, crawler, registry, pipeline, personas, queue, now };

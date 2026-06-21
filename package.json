@@ -22,6 +22,7 @@
     "cli": "node --import tsx packages/cli/src/index.ts",
     "mcp:http": "node --import tsx packages/browser-mcp/src/http-cli.ts",
     "mcp:stdio": "node --import tsx packages/browser-mcp/src/cli.ts",
+    "web": "node --import tsx packages/cli/src/index.ts web",
     "clean": "rm -rf packages/*/dist .ima",
     "queue:work": "node --import tsx packages/cli/src/queue-worker-cli.ts"
   },

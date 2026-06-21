@@ -5,11 +5,11 @@ import { sourceToString } from '../protocol.js';
 import { IdeaRanker } from '../idea-ranker.js';
 import { applyPersonaToPrompt } from '../persona.js';
 
-export class IdeaAgent implements Agent<{ count?: number; feedback?: EngagementMetric[]; persona?: import('../persona.js').Persona | null }, Idea[]> {
+export class IdeaAgent implements Agent<{ count?: number; feedback?: EngagementMetric[]; persona?: import('../persona.js').Persona | null; variantCount?: number }, Idea[]> {
   name = 'idea';
 
   async run(
-    input: { count?: number; feedback?: EngagementMetric[]; persona?: import('../persona.js').Persona | null },
+    input: { count?: number; feedback?: EngagementMetric[]; persona?: import('../persona.js').Persona | null; variantCount?: number },
     content: Content,
     ctx: AgentContext,
   ): Promise<AgentResult<Idea[]>> {
@@ -41,6 +41,14 @@ export class IdeaAgent implements Agent<{ count?: number; feedback?: EngagementM
           () => content.ideas[0]?.angle ?? null,
         );
         ranked = ranked2.map((r) => angleMap.get(r.angle)!).filter(Boolean);
+      }
+
+      // A/B variant tag assignment: round-robin across `variantCount` buckets.
+      // When variantCount is 1, ideas keep no tag (legacy behavior).
+      const variantCount = input.variantCount ?? 1;
+      if (variantCount > 1) {
+        const labels = ['A', 'B', 'C', 'D', 'E'];
+        ranked = ranked.map((idea, i) => ({ ...idea, variantTag: labels[i % variantCount]! }));
       }
 
       if (ranked.length === 0) return err('llm returned no ideas', true);

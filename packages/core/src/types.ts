@@ -43,6 +43,8 @@ export type Idea = {
   hook: string;
   targetPlatform: PlatformId[];
   score: number;
+  /** Optional A/B test variant tag (e.g. 'A', 'B'). */
+  variantTag?: string;
 };
 
 export type Draft = {
@@ -52,6 +54,8 @@ export type Draft = {
   coverHint: string;
   cta: string;
   platformOverrides: Partial<Record<PlatformId, string>>;
+  /** Optional per-locale translations of (title, body). */
+  translations?: { locale: 'zh' | 'en' | 'ja'; title: string; body: string }[];
 };
 
 export type ReviewCheck = {
@@ -78,6 +82,8 @@ export type PostRecord = {
   url?: string;
   error?: string;
   postedAt?: string;
+  /** Optional A/B test variant tag carried over from the source idea. */
+  variantTag?: string;
 };
 
 export type HistoryEntry = {
@@ -96,6 +102,8 @@ export type EngagementMetric = {
   shares: number;
   views: number;
   fetchedAt: string;
+  /** Optional A/B test variant tag carried over from the source post. */
+  variantTag?: string;
 };
 
 export type Content = {

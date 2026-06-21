@@ -2,6 +2,14 @@
 
 多智能体跨平台大 V 全自动运营交付系统：根据网上热点生成内容并跨平台发布。
 
+## v0.5 新增（1+2+3 三个方向）
+
+| 方向 | 实现 |
+|---|---|
+| **多语言自动翻译** | `core/src/translate.ts` 纯函数层（zh / en / ja + parseTranslation + selectForLocale）；`TranslateAgent` 接到 Pipeline 的 `draft → review` 之间；`Draft.translations` 字段 + `platformOverrides` 按 `PLATFORM_LOCALE` 自动分配；CLI bootstrap 默认 `translateTargets: ['en', 'ja']` |
+| **A/B 实验闭环** | `core/src/ab-test.ts` `AbReport` / `assignVariantTags` / `aggregateByVariant` / `selectWinner`；`Idea.variantTag` + `PostRecord.variantTag` + `EngagementMetric.variantTag`；`Pipeline.variantCount` 接入 IdeaAgent；`PublishAgent.deriveTargets` 把 tag 透传到 posts；CLI `ima ab report <id> [--min-samples N]` + `ima run-ab <N> <topic>` |
+| **Web 控制面板** | `apps/web/` 纯静态（HTML + CSS + 原生 JS，零 build）；`@ima/cli/web-server.ts` Node stdlib HTTP 同时提供静态 + `/api/contents/queue/feedback/ab` JSON；CLI `npm run web` / `ima web --port N` 启动；`types/node-globals.d.ts` 补 `http/fs/path/url` 最小 stub（项目用 `types: []`） |
+
 ## v0.4 新增（队列 + worker）
 
 | 方向 | 实现 |
@@ -69,7 +77,7 @@ npm run build
 # 类型检查（5 包 tsc --noEmit）
 npm run check
 
-# 单测（node:test, 142/142 pass）
+# 单测（node:test, 181/181 pass）
 npm test
 
 # Bootstrap demo — 3 条 content 跑完 pipeline（带 persona）
@@ -84,10 +92,13 @@ npm run cli -- persona list                     # 列出所有 persona
 npm run cli -- persona show <id>                # 查看 persona 详情
 npm run cli -- persona add <id> <name> [tone]   # 新增 persona
 npm run cli -- persona remove <id>              # 删除 persona
-npm run cli -- run <topic>                      # 创建并跑完一条 content
+npm run cli -- run <topic>                      # 创建并跑完一条 content（含翻译 en/ja/zh）
+npm run cli -- run-ab <N> <topic>               # 跑 A/B 实验，N 个变体（>=2）
 npm run cli -- run-with-persona <id> <topic>    # 用指定 persona 创建并跑
 npm run cli -- feedback                         # 拉取所有 done content 的 engagement
-npm run cli -- queue list                       # 查看 .ima/queue 中所有发布任务
+npm run cli -- ab report <id> [--min-samples N] # 表格化输出 A/B 胜出方
+npm run queue:work                              # 同 queue work（可配 cron）
+npm run web [-- --port N]                       # 启动 web 控制台（默认 127.0.0.1:5173）
 npm run cli -- queue work [--limit N]           # 跑一次 publish worker（重试 due 项）
 npm run cli -- queue prune                      # 清理 failed_dead
 npm run queue:work                              # 同 queue work（可配 cron）
@@ -184,22 +195,24 @@ type Persona = {
 
 ## 测试覆盖（v0.3）
 
-- **142/142 tests pass（100%）**
-- core: 106 tests（新增 publish-queue × 19、publish-agent × 5、protocol 字段、pipeline 行为兼容）
+- **181/181 tests pass（100%）**
+- core: 143 tests（新增 translate × 14、translate-agent × 6、ab-test × 17、idea-agent variantCount、publish-agent variantTag、pipeline variantCount + translate dispatch）
 - crawler: 9 tests
 - publisher: 9 tests
-- cli: 18 tests（新增 queue-store + PublishWorker + summarizeQueue × 8、savePersonas × 1）
+- cli: 20 tests（新增 web-server × 11、ab-smoke / queue-smoke 端到端）
 - browser-mcp: 13 tests（http MCP server 全场景）
 
 ## 最新验收（2026-06-21）
 
 | 命令 | 结果 |
 |---|---|
-| `npm test` | 142/142 pass（core 106 / crawler 9 / publisher 9 / cli 18） |
+| `npm test` | 181/181 pass（core 143 / crawler 9 / publisher 9 / cli 20） |
 | `npm run check` | 5 packages `tsc --noEmit` pass |
 | `npm run build` | 5 packages build pass |
-| `npm run bootstrap` | fresh `.ima/` 生成 3 条 `done` content，posts=3/1/2 |
-| `npm run cli -- status <id>` | 可查回 `"stage": "done"` 与 `published 3/3 (failed 0)` |
+| `npm run bootstrap` | fresh `.ima/` 生成 3 条 `done` content，posts=3/1/2，translations=en+ja+zh |
+| `npm run cli -- run-ab 2 "WebAssembly 性能"` | variants=A=2 B=1，2 posts |
+| `npm run cli -- ab report <id>` | 表格化输出 variants，无 engagement 时返回 `[info] no winner` |
+| `npm run web -- --port 15173` | `GET /` 200 + 1604 bytes；`/api/contents` JSON 列表；`/api/queue` 14 个 posted；`/api/ab?id=...` winner=A |
 | `npm run cli -- queue list` | 列 6 个 queue item，全部 `posted` |
 | `npm run queue:work` | 跑 0（无 due），no-op |
 | `node --import tsx packages/cli/src/queue-smoke.ts` | 模拟 503 → retry 1次 → due 后成功 posted，端到端验证 |

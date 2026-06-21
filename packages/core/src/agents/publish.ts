@@ -16,11 +16,11 @@ export class PublishAgent implements Agent<void, PostRecord[]> {
       const records: PostRecord[] = [];
       // apply platform adapter before posting
       const overrides: Partial<Record<PlatformId, string>> = {};
-      for (const p of targets) {
+      for (const { platform: p } of targets) {
         const adapted = adaptForPlatform({ title: draft.title, body: draft.body, tags: draft.tags, platform: p });
         overrides[p] = adapted.body;
       }
-      for (const p of targets) {
+      for (const { platform: p, variantTag } of targets) {
         const body = overrides[p] ?? draft.body;
         const now = ctx.now();
         const item: QueueItem = createQueueItem({
@@ -39,7 +39,7 @@ export class PublishAgent implements Agent<void, PostRecord[]> {
         };
         try {
           const rec = await ctx.publisher.post(p, { title: draft.title, body, tags: draft.tags });
-          records.push({ ...rec, postedAt: rec.postedAt ?? now });
+          records.push({ ...rec, postedAt: rec.postedAt ?? now, ...(variantTag ? { variantTag } : {}) });
           await safeSink({ ...item, status: 'posted', postId: rec.postId, url: rec.url ?? null, postedAt: rec.postedAt ?? now });
         } catch (e) {
           const errMsg = (e as Error).message;
@@ -51,6 +51,7 @@ export class PublishAgent implements Agent<void, PostRecord[]> {
             status: 'failed',
             error: errMsg,
             postedAt: now,
+            ...(variantTag ? { variantTag } : {}),
           });
         }
       }
@@ -64,10 +65,26 @@ export class PublishAgent implements Agent<void, PostRecord[]> {
   }
 }
 
-function deriveTargets(content: Content): PlatformId[] {
-  const set = new Set<PlatformId>();
-  for (const p of content.posts) set.add(p.platform);
-  for (const idea of content.ideas) for (const p of idea.targetPlatform) set.add(p);
-  if (set.size === 0) set.add('x');
-  return Array.from(set);
+function deriveTargets(content: Content): Array<{ platform: PlatformId; variantTag?: string }> {
+  // pair each platform with the variant tag of the first idea that targets it.
+  // This lets the queue item carry a per-platform variant tag derived from
+  // the source idea without changing PostRecord semantics.
+  const out: Array<{ platform: PlatformId; variantTag?: string }> = [];
+  const seen = new Set<PlatformId>();
+  for (const idea of content.ideas) {
+    for (const p of idea.targetPlatform) {
+      if (seen.has(p)) continue;
+      seen.add(p);
+      out.push({ platform: p, ...(idea.variantTag ? { variantTag: idea.variantTag } : {}) });
+    }
+  }
+  if (out.length === 0) out.push({ platform: 'x' });
+  // also include any platform already in posts but not in ideas (e.g. retry)
+  for (const p of content.posts) {
+    if (!seen.has(p.platform)) {
+      seen.add(p.platform);
+      out.push({ platform: p.platform, ...(p.variantTag ? { variantTag: p.variantTag } : {}) });
+    }
+  }
+  return out;
 }
