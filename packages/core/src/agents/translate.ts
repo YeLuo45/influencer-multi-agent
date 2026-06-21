@@ -9,6 +9,7 @@ const PLATFORM_LOCALE: Readonly<Record<PlatformId, Locale>> = Object.freeze({
   weibo: 'zh',
   bilibili: 'zh',
   reddit: 'en',
+  youtube: 'en',
 });
 
 export interface TranslateInput {

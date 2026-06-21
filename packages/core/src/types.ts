@@ -19,7 +19,7 @@ export const CONTENT_STAGES: readonly ContentStage[] = [
   'needs_revision',
 ] as const;
 
-export type PlatformId = 'x' | 'xiaohongshu' | 'weibo' | 'bilibili' | 'reddit';
+export type PlatformId = 'x' | 'xiaohongshu' | 'weibo' | 'bilibili' | 'reddit' | 'youtube';
 
 export const PLATFORMS: readonly PlatformId[] = [
   'x',
@@ -27,6 +27,7 @@ export const PLATFORMS: readonly PlatformId[] = [
   'weibo',
   'bilibili',
   'reddit',
+  'youtube',
 ] as const;
 
 export type Source = {

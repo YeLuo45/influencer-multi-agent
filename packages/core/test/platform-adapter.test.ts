@@ -1,10 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { adaptForPlatform, adaptForAllPlatforms, PLATFORM_CONSTRAINTS } from '../src/platform-adapter.js';
+import { PLATFORMS } from '../src/types.js';
 
-void test('PLATFORM_CONSTRAINTS: all 5 platforms defined', () => {
-  assert.equal(Object.keys(PLATFORM_CONSTRAINTS).length, 5);
-  for (const p of ['x', 'xiaohongshu', 'weibo', 'bilibili', 'reddit'] as const) {
+void test('PLATFORM_CONSTRAINTS: every platform is defined', () => {
+  assert.equal(Object.keys(PLATFORM_CONSTRAINTS).length, PLATFORMS.length);
+  for (const p of PLATFORMS) {
     assert.ok(PLATFORM_CONSTRAINTS[p]);
   }
 });
@@ -68,7 +69,20 @@ void test('adaptForPlatform: reddit preserves long body', () => {
   assert.match(out.cta, /think/i);
 });
 
-void test('adaptForAllPlatforms: returns all 5', () => {
+void test('adaptForPlatform: youtube builds video description', () => {
+  const out = adaptForPlatform({
+    title: 'Y'.repeat(120),
+    body: 'Video summary',
+    tags: ['ai', 'creator'],
+    platform: 'youtube',
+  });
+  assert.equal(out.title.length, 100);
+  assert.match(out.body, /Video summary/);
+  assert.match(out.body, /Like & Subscribe/);
+  assert.deepEqual(out.tags, ['ai', 'creator']);
+});
+
+void test('adaptForAllPlatforms: returns requested platforms', () => {
   const out = adaptForAllPlatforms({
     title: 'X',
     body: 'Y',
@@ -82,7 +96,7 @@ void test('adaptForAllPlatforms: returns all 5', () => {
 });
 
 void test('adaptForPlatform: never exceeds maxLength', () => {
-  for (const p of ['x', 'xiaohongshu', 'weibo', 'bilibili', 'reddit'] as const) {
+  for (const p of PLATFORMS) {
     const out = adaptForPlatform({
       title: 'T'.repeat(1000),
       body: 'B'.repeat(50000),

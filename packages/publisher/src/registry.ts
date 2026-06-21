@@ -6,17 +6,35 @@ import {
   WeiboChannel,
   BilibiliChannel,
   RedditChannel,
+  YoutubeChannel,
 } from './channels.js';
+import {
+  createRealChannel,
+  type CreateRealChannelOptions,
+} from './real-channels.js';
 
 export class ChannelRegistry {
   private readonly map = new Map<PlatformId, Channel>();
 
-  constructor() {
-    this.register(new XChannel());
-    this.register(new XiaohongshuChannel());
-    this.register(new WeiboChannel());
-    this.register(new BilibiliChannel());
-    this.register(new RedditChannel());
+  constructor(mode: CreateRealChannelOptions['mode'] = 'stub', opts: { fetchImpl?: typeof fetch; now?: () => string } = {}) {
+    if (mode === 'real' || mode === 'mixed') {
+      for (const p of this.platformsForMode()) {
+        const ch = createRealChannel(p, { mode: 'real', ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}), ...(opts.now ? { now: opts.now } : {}) });
+        this.register(ch);
+      }
+    }
+    if (mode === 'stub' || mode === 'mixed') {
+      this.register(new XChannel());
+      this.register(new XiaohongshuChannel());
+      this.register(new WeiboChannel());
+      this.register(new BilibiliChannel());
+      this.register(new RedditChannel());
+      this.register(new YoutubeChannel());
+    }
+  }
+
+  private platformsForMode(): PlatformId[] {
+    return ['x', 'xiaohongshu', 'weibo', 'bilibili', 'reddit', 'youtube'] as PlatformId[];
   }
 
   register(c: Channel): void {
@@ -65,6 +83,17 @@ export class ChannelRegistry {
   }
 }
 
-export function createRegistry(): ChannelRegistry {
-  return new ChannelRegistry();
+export function createRegistry(mode: CreateRealChannelOptions['mode'] = 'stub', opts: { fetchImpl?: typeof fetch; now?: () => string } = {}): ChannelRegistry {
+  return new ChannelRegistry(mode, opts);
+}
+
+/**
+ * Build a registry from the `IMA_CHANNELS_MODE` env var (or an override).
+ * Resolution order per platform:
+ *   1. If env var set AND mode=real/mixed → real channel takes precedence
+ *   2. Otherwise → stub channel (deterministic, offline-safe)
+ */
+export function createRegistryFromEnv(opts: { mode?: 'stub' | 'real' | 'mixed'; fetchImpl?: typeof fetch; now?: () => string } = {}): ChannelRegistry {
+  const mode = opts.mode ?? (process.env['IMA_CHANNELS_MODE'] as 'stub' | 'real' | 'mixed' | undefined) ?? 'stub';
+  return new ChannelRegistry(mode, { ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}), ...(opts.now ? { now: opts.now } : {}) });
 }

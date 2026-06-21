@@ -71,6 +71,12 @@ export class RedditChannel extends StubChannelBase {
   }
 }
 
+export class YoutubeChannel extends StubChannelBase {
+  constructor() {
+    super('youtube');
+  }
+}
+
 export class AlwaysFailChannel implements Channel {
   readonly id: PlatformId;
   constructor(id: PlatformId) {

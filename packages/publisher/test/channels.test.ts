@@ -5,7 +5,7 @@ import {
   AlwaysFailChannel,
   StubChannelBase,
 } from '../src/channels.js';
-import { ChannelRegistry, createRegistry } from '../src/registry.js';
+import { ChannelRegistry, createRegistry, createRegistryFromEnv } from '../src/registry.js';
 import { PLATFORMS } from '@ima/core/types';
 
 test('every platform has a default channel', () => {
@@ -25,13 +25,13 @@ test('XChannel posts successfully', async () => {
   assert.match(r.url ?? '', /^https:\/\/x\.example\.com\/p\//);
 });
 
-test('All 5 default channels produce unique urls', async () => {
+test('All default channels produce unique urls', async () => {
   const r = createRegistry();
   const inputs = { title: 't', body: 'b', tags: [] };
   const records = await r.postAll(inputs);
-  assert.equal(records.length, 5);
+  assert.equal(records.length, PLATFORMS.length);
   const urls = new Set(records.map((r) => r.url));
-  assert.equal(urls.size, 5);
+  assert.equal(urls.size, PLATFORMS.length);
 });
 
 test('AlwaysFailChannel returns failed', async () => {
@@ -44,7 +44,7 @@ test('AlwaysFailChannel returns failed', async () => {
 test('ChannelRegistry doctor covers all channels', async () => {
   const r = createRegistry();
   const rpt = await r.doctor();
-  assert.equal(rpt.length, 5);
+  assert.equal(rpt.length, PLATFORMS.length);
   for (const x of rpt) assert.ok(x.detail);
 });
 
@@ -73,4 +73,43 @@ test('StubChannelBase rejects unknown platforms gracefully', async () => {
   const c = new StubChannelBase('x');
   const r = await c.healthCheck();
   assert.ok(r.ok);
+});
+
+test('ChannelRegistry: get throws for unknown channel id', () => {
+  const r = new ChannelRegistry();
+  assert.throws(() => r.get('unknown' as never), /channel not registered: unknown/);
+  assert.equal(r.ids().length, PLATFORMS.length);
+});
+
+test('ChannelRegistry: postAll records failures from channels', async () => {
+  const r = new ChannelRegistry();
+  r.register(new AlwaysFailChannel('x'));
+  const records = await r.postAll({ title: 't', body: 'b', tags: [] });
+  assert.equal(records.length, PLATFORMS.length);
+  const failed = records.find((record) => record.platform === 'x');
+  assert.equal(failed?.status, 'failed');
+  assert.equal(failed?.postId, null);
+  assert.match(failed?.error ?? '', /always fail/);
+});
+
+test('ChannelRegistry: mixed mode prefers stub registrations after real setup', async () => {
+  const r = createRegistry('mixed', {
+    fetchImpl: async () => new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    now: () => '2026-06-21T00:00:00.000Z',
+  });
+  assert.deepEqual(r.ids(), [...PLATFORMS]);
+  const record = await r.get('x').post({ title: 'mixed', body: 'body', tags: [] });
+  assert.match(record.url ?? '', /^https:\/\/x\.example\.com\/p\//);
+});
+
+test('createRegistryFromEnv: reads mode override and env fallback', () => {
+  const previous = process.env.IMA_CHANNELS_MODE;
+  try {
+    process.env.IMA_CHANNELS_MODE = 'mixed';
+    assert.equal(createRegistryFromEnv().ids().length, PLATFORMS.length);
+    assert.equal(createRegistryFromEnv({ mode: 'stub' }).ids().length, PLATFORMS.length);
+  } finally {
+    if (previous === undefined) delete process.env.IMA_CHANNELS_MODE;
+    else process.env.IMA_CHANNELS_MODE = previous;
+  }
 });

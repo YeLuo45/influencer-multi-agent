@@ -44,6 +44,13 @@ export const PLATFORM_CONSTRAINTS: Readonly<Record<PlatformId, PlatformConstrain
     ctaSuffix: 'What do you think?',
     toneHint: 'long-form, discussion-prompting',
   },
+  youtube: {
+    maxLength: 5000,
+    emojiEncouraged: false,
+    hashtagStyle: 'inline',
+    ctaSuffix: '👍 Like & Subscribe for more',
+    toneHint: 'video description; chapter markers, links, SEO keywords',
+  },
 });
 
 export interface AdaptInput {
@@ -74,6 +81,8 @@ export function adaptForPlatform(input: AdaptInput): AdaptOutput {
       return adaptBilibili(input, c);
     case 'reddit':
       return adaptReddit(input, c);
+    case 'youtube':
+      return adaptYoutube(input, c);
   }
 }
 
@@ -142,6 +151,15 @@ function adaptReddit(input: AdaptInput, c: PlatformConstraints): AdaptOutput {
     tags: input.tags,
     cta: 'What do you think?',
   };
+}
+
+function adaptYoutube(input: AdaptInput, c: PlatformConstraints): AdaptOutput {
+  // YouTube description is a separate field from the title. We keep the
+  // platform-adapted body for the description and put a "shorts-friendly"
+  // lead in the title.
+  const title = truncate(input.title, 100);
+  const body = truncate(`${input.body}\n\n${c.ctaSuffix}`, c.maxLength);
+  return { title, body, tags: input.tags, cta: c.ctaSuffix };
 }
 
 export interface AdaptAllInput {
