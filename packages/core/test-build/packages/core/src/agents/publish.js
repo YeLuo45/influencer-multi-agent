@@ -1,4 +1,5 @@
 import { err, ok } from '../protocol.js';
+import { adaptForPlatform } from '../platform-adapter.js';
 export class PublishAgent {
     name = 'publish';
     async run(_input, content, ctx) {
@@ -10,8 +11,14 @@ export class PublishAgent {
             return err('no target platforms', true);
         try {
             const records = [];
+            // apply platform adapter before posting
+            const overrides = {};
             for (const p of targets) {
-                const body = draft.platformOverrides[p] ?? draft.body;
+                const adapted = adaptForPlatform({ title: draft.title, body: draft.body, tags: draft.tags, platform: p });
+                overrides[p] = adapted.body;
+            }
+            for (const p of targets) {
+                const body = overrides[p] ?? draft.body;
                 try {
                     const rec = await ctx.publisher.post(p, { title: draft.title, body, tags: draft.tags });
                     records.push(rec);

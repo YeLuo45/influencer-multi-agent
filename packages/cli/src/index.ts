@@ -1,5 +1,6 @@
 import { createApp, saveContent, listContentIds, loadContent, savePersonas, fetchAndAppendEngagement } from './app.js';
 import { Pipeline } from '@ima/core';
+import { PublishWorker, summarizeQueue } from './queue-worker.js';
 
 async function main(): Promise<void> {
   const app = createApp();
@@ -69,6 +70,8 @@ async function main(): Promise<void> {
     const crawlerCheck = await app.crawler.fetch('https://example.com/ping').catch(() => null);
     console.log(crawlerCheck ? 'OK   crawler      composite ok' : 'FAIL  crawler      unreachable');
     console.log(`OK   engagement   ${createEngagementInfo()}`);
+    console.log(`OK   llm          provider=${app.llm.provider} model=${app.llm.model}`);
+    console.log(`OK   personas     count=${app.personas.count()}`);
     return;
   }
 
@@ -126,9 +129,46 @@ async function main(): Promise<void> {
     const ids = await listContentIds(app.store);
     const contents = await Promise.all(ids.map((id) => loadContent(app.store, id)));
     const valid = contents.filter((c): c is NonNullable<typeof c> => c !== null && c.posts.length > 0);
-    const metrics = await fetchAndAppendEngagement(app.store, valid);
-    console.log(`[ok] fetched ${metrics.length} engagement records across ${valid.length} contents`);
+    const { metrics, saved } = await fetchAndAppendEngagement(app.store, valid);
+    console.log(`[ok] fetched ${metrics.length} engagement records; feedback.json now has ${saved} records (window-filtered)`);
     return;
+  }
+
+  if (cmd === 'queue') {
+    const sub = argv[1];
+    const items = await app.queue.list();
+    const summary = summarizeQueue(items);
+    if (sub === 'list' || sub === undefined) {
+      console.log(`total=${summary.total} pending=${summary.byStatus.pending} posting=${summary.byStatus.posting} posted=${summary.byStatus.posted} retry=${summary.byStatus.failed_retry} dead=${summary.byStatus.failed_dead}`);
+      for (const it of items) {
+        const attemptsShown = it.status === 'posted' && it.attempts === 0 ? '-' : `${it.attempts}/${it.maxAttempts}`;
+        console.log(`${it.id}  [${it.status.padEnd(13)}]  c=${it.contentId}  p=${it.platform}  attempts=${attemptsShown}  next=${it.nextAttemptAt}`);
+      }
+      return;
+    }
+    if (sub === 'work') {
+      const limitArg = argv.indexOf('--limit');
+      const limit = limitArg >= 0 ? Number(argv[limitArg + 1]) : undefined;
+      const worker = new PublishWorker(app.queue, app.registry);
+      const r = await worker.runOnce({
+        ...(limit !== undefined && Number.isFinite(limit) ? { limit } : {}),
+      });
+      console.log(`[ok] scanned=${r.scanned} processed=${r.processed} posted=${r.posted} retry=${r.retryScheduled} dead=${r.deadLettered}`);
+      return;
+    }
+    if (sub === 'prune') {
+      const before = items.length;
+      let removed = 0;
+      for (const it of items) {
+        if (it.status === 'failed_dead') {
+          await app.queue.remove(it.id);
+          removed += 1;
+        }
+      }
+      console.log(`[ok] pruned ${removed} dead-letter items (of ${before} total)`);
+      return;
+    }
+    throw new Error(`usage: ima queue [list|work|prune]`);
   }
 
   throw new Error(`unknown command: ${cmd}`);
@@ -153,6 +193,9 @@ Usage:
   ima persona add <id> <name> [tone]    Add a new persona
   ima persona remove <id>               Remove a persona
   ima feedback                          Fetch engagement for all done contents
+  ima queue list                        List durable publish queue (.ima/queue)
+  ima queue work [--limit N]            Run publish worker once (process due items)
+  ima queue prune                       Remove dead-letter items from queue
   ima help                              This help
 `);
 }

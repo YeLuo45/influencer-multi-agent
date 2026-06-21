@@ -18,6 +18,12 @@ export interface AgentContext {
   llm: { complete(prompt: string, opts?: { system?: string; maxTokens?: number }): Promise<string> };
   crawler: CrawlerLike;
   publisher: PublisherLike;
+  /**
+   * Optional durable queue sink. When supplied, PublishAgent writes a QueueItem
+   * per posted-or-failed platform so a background worker can resume after a
+   * crash. If omitted, PublishAgent behaves as before (no persistence).
+   */
+  queueSink?: (item: import('./publish-queue.js').QueueItem) => Promise<void>;
   now(): string;
 }
 

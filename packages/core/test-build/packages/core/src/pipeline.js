@@ -14,10 +14,14 @@ export class Pipeline {
     audit = new AuditAgent();
     maxRevisions;
     ideaCount;
+    feedback;
+    personaLookup;
     constructor(ctx, opts = {}) {
         this.ctx = ctx;
         this.maxRevisions = opts.maxRevisionRounds ?? DEFAULT_MAX_REVISIONS;
         this.ideaCount = opts.ideaCount ?? 5;
+        this.feedback = opts.feedback ?? [];
+        this.personaLookup = opts.personaLookup ?? (() => null);
     }
     static createContent(topic, persona) {
         return createContent({ id: `c-${randomUUID().slice(0, 8)}`, topic, ...(persona ? { persona } : {}) });
@@ -43,6 +47,7 @@ export class Pipeline {
     }
     async dispatch(content) {
         const from = content.stage;
+        const persona = this.personaLookup(content.persona);
         switch (from) {
             case 'intake':
                 return this.simpleTransition(content, 'research');
@@ -53,13 +58,13 @@ export class Pipeline {
                 return this.applyOk(content, 'ideas', 'research', `captured ${r.data.length} sources`, (c) => ({ ...c, sources: r.data }));
             }
             case 'ideas': {
-                const r = await this.idea.run({ count: this.ideaCount }, content, this.ctx);
+                const r = await this.idea.run({ count: this.ideaCount, feedback: this.feedback, persona }, content, this.ctx);
                 if (r.kind !== 'ok')
                     return { ok: false };
                 return this.applyOk(content, 'draft', 'idea', `generated ${r.data.length} ideas`, (c) => ({ ...c, ideas: r.data }));
             }
             case 'draft': {
-                const r = await this.draft.run({ ideaIndex: 0 }, content, this.ctx);
+                const r = await this.draft.run({ ideaIndex: 0, persona }, content, this.ctx);
                 if (r.kind !== 'ok')
                     return { ok: false };
                 return this.applyOk(content, 'review', 'draft', `drafted: ${r.data.title}`, (c) => ({ ...c, draft: r.data }));
@@ -74,7 +79,6 @@ export class Pipeline {
             }
             case 'needs_revision': {
                 if (content.revisionCount >= this.maxRevisions) {
-                    // 强制 done，避免无限循环
                     return this.applyOk(content, 'done', 'pipeline', 'max revisions reached, capping to done', (c) => c);
                 }
                 return this.applyOk(content, 'draft', 'pipeline', `revision round ${content.revisionCount + 1}`, (c) => ({ ...c, revisionCount: c.revisionCount + 1, review: null }));
@@ -113,7 +117,6 @@ export class Pipeline {
         }
         catch (e) {
             if (e instanceof InvalidTransition) {
-                // 兜底：若 review 决策后需要走 needs_revision 但状态不允许，记入 history
                 const entry = this.entry(content.stage, content.stage, agent, `blocked: ${e.message}`);
                 return { ok: true, content: { ...content, history: [...content.history, entry], updatedAt: this.ctx.now() }, advanced: false };
             }

@@ -113,19 +113,20 @@ export class Pipeline {
         const sched = await this.schedule.run(undefined, content, this.ctx);
         const r = await this.publish.run(undefined, content, this.ctx);
         if (r.kind !== 'ok') return { ok: false };
-        const audit = await this.audit.run(undefined, content, this.ctx);
-        const note = audit.kind === 'ok' ? audit.data.note : 'published';
         const schedData = sched.kind === 'ok' ? sched.data : null;
+        const publishedContent: Content = {
+          ...content,
+          posts: r.data,
+          ...(schedData ? { schedule: schedData } : {}),
+        };
+        const audit = await this.audit.run(undefined, publishedContent, this.ctx);
+        const note = audit.kind === 'ok' ? audit.data.note : 'published';
         return this.applyOk(
-          content,
+          publishedContent,
           'done',
           'publish',
           note,
-          (c) => ({
-            ...c,
-            posts: r.data,
-            ...(schedData ? { schedule: schedData } : {}),
-          }),
+          (c) => c,
         );
       }
       case 'done':

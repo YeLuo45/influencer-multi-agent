@@ -103,3 +103,14 @@ test('pipeline: history records agent names', async () => {
   assert.ok(agents.has('review'));
   assert.ok(agents.has('publish'));
 });
+
+test('pipeline: publish history note includes real post counts', async () => {
+  const ctx = makeCtx();
+  const pipeline = new Pipeline(ctx, { ideaCount: 2 });
+  const c = createContent({ id: 'c-publish-note', topic: 'AI Agent 趋势' });
+  const final = await pipeline.run(c);
+  const publishEntry = final.history.find((h) => h.agent === 'publish');
+  assert.ok(publishEntry);
+  assert.equal(final.posts.length, 3);
+  assert.match(publishEntry.note, /published 3\/3 \(failed 0\)/);
+});

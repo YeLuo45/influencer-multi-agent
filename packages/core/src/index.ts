@@ -8,4 +8,7 @@ export * from './engagement.js';
 export * from './idea-ranker.js';
 export * from './engagement-tracker.js';
 export * from './persona.js';
+export * from './platform-adapter.js';
+export * from './feedback-store.js';
+export * from './publish-queue.js';
 export { ResearchAgent, IdeaAgent, DraftAgent, ReviewAgent, ScheduleAgent, PublishAgent, AuditAgent } from './agents/index.js';

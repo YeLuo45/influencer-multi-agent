@@ -1,8 +1,11 @@
-import type { Content } from './types.js';
+import type { Content, EngagementMetric } from './types.js';
 import type { AgentContext } from './protocol.js';
+import type { Persona } from './persona.js';
 export interface PipelineOptions {
     maxRevisionRounds?: number;
     ideaCount?: number;
+    feedback?: EngagementMetric[];
+    personaLookup?: (id: string) => Persona | null;
 }
 export declare class Pipeline {
     private readonly ctx;
@@ -15,6 +18,8 @@ export declare class Pipeline {
     private readonly audit;
     private readonly maxRevisions;
     private readonly ideaCount;
+    private readonly feedback;
+    private readonly personaLookup;
     constructor(ctx: AgentContext, opts?: PipelineOptions);
     static createContent(topic: string, persona?: string): Content;
     step(content: Content): Promise<{

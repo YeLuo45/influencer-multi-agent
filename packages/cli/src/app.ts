@@ -7,9 +7,16 @@ import {
   PersonaRegistry,
   type Content,
   type EngagementMetric,
+  emptyFeedback,
+  appendFeedback,
+  filterByWindow,
+  type FeedbackState,
 } from '@ima/core';
 import { createCrawler } from '@ima/crawler';
 import { createRegistry } from '@ima/publisher';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { QueueStore } from './queue-store.js';
 
 export interface AppContext {
   store: JsonStore;
@@ -18,6 +25,7 @@ export interface AppContext {
   registry: ReturnType<typeof createRegistry>;
   pipeline: Pipeline;
   personas: PersonaRegistry;
+  queue: QueueStore;
   now: () => string;
 }
 
@@ -28,9 +36,9 @@ export function createApp(): AppContext {
   const registry = createRegistry();
   const personas = loadPersonas(store);
   const now = (): string => new Date().toISOString();
+  const queue = new QueueStore(store);
 
-  // load historical engagement metrics for idea re-ranking
-  const feedback = loadAllEngagement(store);
+  const feedback = loadFeedbackSync(store, now);
 
   const pipeline = new Pipeline(
     {
@@ -40,6 +48,7 @@ export function createApp(): AppContext {
         post: (platform, content) => registry.get(platform).post(content),
         healthCheck: (platform) => registry.get(platform).healthCheck(),
       },
+      queueSink: async (item) => { await queue.write(item); },
       now,
     },
     {
@@ -49,12 +58,11 @@ export function createApp(): AppContext {
       personaLookup: (id) => personas.get(id),
     },
   );
-  return { store, llm, crawler, registry, pipeline, personas, now };
+  return { store, llm, crawler, registry, pipeline, personas, queue, now };
 }
 
 function loadPersonas(store: JsonStore): PersonaRegistry {
   const reg = new PersonaRegistry();
-  // seed with default + sample personas
   const defaultPersona = {
     id: 'default',
     name: '通用大 V',
@@ -106,7 +114,7 @@ function loadPersonas(store: JsonStore): PersonaRegistry {
   };
   reg.upsert(lifestylePersona);
 
-  // load any user-defined personas from storage
+  // asynchronously merge user-defined personas
   void store.read<Record<string, unknown>>('personas.json').then((p) => {
     if (p && typeof p === 'object') {
       for (const v of Object.values(p)) {
@@ -117,10 +125,17 @@ function loadPersonas(store: JsonStore): PersonaRegistry {
   return reg;
 }
 
-function loadAllEngagement(_store: JsonStore): EngagementMetric[] {
-  // synchronously return empty; full history is loaded asynchronously
-  // (kept synchronous to fit Pipeline constructor signature)
-  return [];
+/** Synchronously load feedback state from storage; returns empty if no file. */
+function loadFeedbackSync(store: JsonStore, now: () => string): EngagementMetric[] {
+  const p = join(store.root, 'feedback.json');
+  if (!existsSync(p)) return [];
+  try {
+    const raw = readFileSync(p, 'utf-8');
+    const state = JSON.parse(raw) as FeedbackState;
+    return filterByWindow(state.records, state.windowDays, now());
+  } catch {
+    return [];
+  }
 }
 
 export async function saveContent(store: JsonStore, c: Content): Promise<void> {
@@ -140,23 +155,25 @@ export function createContentFor(topic: string, persona?: string): Content {
   return createContent({ id: `c-${Date.now().toString(36)}-${Math.floor(Math.random() * 1000)}`, topic, ...(persona ? { persona } : {}) });
 }
 
-export async function savePersonas(_store: JsonStore, reg: PersonaRegistry): Promise<void> {
+export async function savePersonas(store: JsonStore, reg: PersonaRegistry): Promise<void> {
   const map: Record<string, unknown> = {};
   for (const p of reg.list()) map[p.id] = p;
-  // personas JSON snapshot — will be persisted alongside content
-  // (kept lightweight; full CRUD happens via app.personas in-memory)
-  void map;
+  await store.write('personas.json', map);
 }
 
-export async function fetchAndAppendEngagement(store: JsonStore, contents: Content[]): Promise<EngagementMetric[]> {
+export async function fetchAndAppendEngagement(
+  store: JsonStore,
+  contents: Content[],
+  now: () => string = () => new Date().toISOString(),
+): Promise<{ metrics: EngagementMetric[]; saved: number }> {
   const tracker = createEngagementTracker();
-  const out: EngagementMetric[] = [];
+  const metrics: EngagementMetric[] = [];
   for (const c of contents) {
     for (const post of c.posts) {
       if (!post.postId) continue;
       try {
         const m = await tracker.fetch(post.platform, post.postId);
-        out.push(m);
+        metrics.push(m);
         c.engagement.push(m);
       } catch {
         // skip
@@ -166,5 +183,12 @@ export async function fetchAndAppendEngagement(store: JsonStore, contents: Conte
       await saveContent(store, c);
     }
   }
-  return out;
+
+  // persist feedback.json with window filter
+  const stateRaw = await store.read<FeedbackState>('feedback.json');
+  const cur: FeedbackState = stateRaw ?? emptyFeedback(now());
+  const merged = appendFeedback(cur, metrics, now());
+  await store.write('feedback.json', merged);
+
+  return { metrics, saved: merged.records.length };
 }

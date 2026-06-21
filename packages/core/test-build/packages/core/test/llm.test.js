@@ -9,9 +9,9 @@ test('MockLlm: returns title containing topic marker for title prompts', async (
 });
 test('MockLlm: returns body for body prompts', async () => {
     const llm = new MockLlm();
-    const r = await llm.complete('topic: X\nWrite body.');
+    const r = await llm.complete('topic: X\nWrite a 200-word Chinese post body.');
     assert.match(r, /我观察到/);
-    assert.match(r, /三个信号/);
+    assert.match(r, /三个核心信号/);
 });
 test('MockLlm: returns ideas JSON for ideas prompts', async () => {
     const llm = new MockLlm();

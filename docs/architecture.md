@@ -112,8 +112,11 @@ agent 都是 stub + mock-LLM 实现（参考 `mock-llm-context-priority` 模式�
 
 `@ima/core/llm.ts` 暴露 `complete(prompt, opts)`：
 - `MockLlm` — 默认实现，按关键词返回 plausible 内容（无 key）
-- `OpenAICompatibleLlm` — 接任意 OpenAI 协议端点（含 Anthropic-OpenAI-proxy）
+- `OpenAICompatibleLlm` — 接任意 OpenAI-compatible 端点（OpenAI / CRS / DeepSeek / proxy 均可）
 - env 变量 `IMA_LLM_ENDPOINT`, `IMA_LLM_KEY`, `IMA_LLM_MODEL` 切换
+- `complete()` 支持 `system`, `maxTokens`, `temperature`
+- timeout 默认 30s；5xx/429/network/AbortError 自动指数退避重试
+- `provider/model` 暴露给 CLI `doctor`，便于确认当前真实模型
 
 ## 7. publisher channels
 
@@ -168,6 +171,16 @@ CLI 命令 `npm run mcp:http` 启动 HTTP server（默认 `127.0.0.1:3000`），
 `@ima/core/engagement-tracker.ts` `MockEngagementTracker` + `CompositeEngagementTracker` + `createEngagementTracker()`。
 `Pipeline` 注入 `feedback: EngagementMetric[]`，在 ideas 阶段让 IdeaAgent 应用 ranker。
 CLI `npm run cli -- feedback` 拉取所有 done content 的 engagement 写入 storage。
+v0.3 起 engagement 会持久化到 `.ima/feedback.json`：
+```ts
+type FeedbackState = {
+  records: EngagementMetric[];
+  windowDays: number;
+  lastUpdated: string;
+  totalRecords: number;
+};
+```
+`createApp()` 启动时同步读取该文件并按窗口过滤，作为 `Pipeline.feedback` 注入到 IdeaAgent。
 
 ## 11. persona management（v0.2 新增）
 
@@ -180,26 +193,62 @@ CLI 命令：
 - `ima persona remove <id>`
 内置 3 个 persona：`default` / `tech-insight` / `lifestyle`。
 
-## 12. test pyramid
+## 12. publish queue（v0.4 新增）
 
-- `@ima/core/test/` — 48 tests（state-machine × 7, storage × 4, llm × 4, pipeline × 5, engagement × 5, idea-ranker × 7, engagement-tracker × 7, persona × 9）
+`@ima/core/publish-queue.ts` 是状态机 + 纯函数层；`@ima/cli/queue-store.ts` 持久化到 `.ima/queue/<id>.json`；`@ima/cli/queue-worker.ts` 周期拉快照 + 调 `processQueue` 重试 due 项。
+
+`QueueItem` 状态机：
+```
+pending ─► posting ─► posted           (terminal success)
+                ├─► failed_retry ─► posting   (next due after backoff)
+                └─► failed_dead              (max attempts exceeded)
+```
+
+关键约束：
+- `AgentContext.queueSink` 可选；不存在时 `PublishAgent` 行为与 v0.3 完全一致（向后兼容）。
+- `safeSink` 包裹任何 sink 调用，sink 抛错不掩盖 publish 失败。
+- 指数退避 `baseDelayMs * 3^(attempts-1)`，封顶 1 小时。
+- 默认 `maxAttempts = 3`，可在 enqueue 时覆盖。
+- worker 纯函数：`processQueue(items, resolver, opts)` 输入快照返回更新后的 items + summary，调用方负责持久化。
+
+CLI 命令：
+- `ima queue list` — 列所有 item + 状态/平台/attempts
+- `ima queue work [--limit N]` — 跑一次 worker，处理 due 项
+- `ima queue prune` — 删 `failed_dead`
+- `npm run queue:work` — 同 `queue work`（可配 cron）
+
+## 13. platform adapter（v0.3 新增）
+
+`@ima/core/platform-adapter.ts` 是纯函数层，`PublishAgent` 发帖前统一调用：
+- X：280 字以内，最多 3 tags
+- 小红书：1000 字以内，emoji-rich + `姐妹们` 口吻，最多 5 tags
+- 微博：2000 字以内，标题首行 + inline hashtags
+- B站：5000 字以内，三段式：标题 / 核心观点 / 互动
+- Reddit：40000 字以内，长文讨论导向，CTA `What do you think?`
+
+发布阶段顺序约束：先写入 `posts/schedule` 到临时 content，再运行 `AuditAgent`。否则 Audit 会看到空 posts，history note 会错误显示 `published 0/0`。
+
+## 13. test pyramid
+
+- `@ima/core/test/` — 106 tests（state-machine × 7, storage × 4, llm × 4, llm-openai × 13, pipeline × 6, publish-agent × 5, engagement × 5, feedback-store × 9, platform-adapter × 11, publish-queue × 19, idea-ranker × 7, engagement-tracker × 7, persona × 9）
 - `@ima/crawler/test/` — 9 tests
 - `@ima/publisher/test/` — 9 tests
+- `@ima/cli/test/` — 18 tests（queue-store + PublishWorker + summarizeQueue × 8, savePersonas × 1, runtime hooks）
 - `@ima/browser-mcp/test/` — 13 tests（http MCP server 全场景）
 - `scripts/e2e-bootstrap.test.ts` — 端到端跑通 1 条 content
 
-## 13. 不做什么（v0.2 边界）
+## 14. 不做什么（v0.4 边界）
 
-- 不接真实 LLM API（保留接口 + MockLlm 默认实现）
 - 不接真实社媒 API（5 个 channel 都是 deterministic stub）
-- 不做实时评论自动回复（v0.3+）
-- 不做自动 A/B 实验（v0.3+）
+- 不做实时评论自动回复（v0.5+）
+- 不做自动 A/B 实验（v0.5+）
 
-## 14. 后续迭代方向（v0.3+）
+## 15. 后续迭代方向（v0.5+）
 
-1. **真实 LLM 接入** — CRS API 已验证可用，env 切换 OpenAI-compatible endpoint
-2. **真实 channel 接入** — X/Twitter API + XHS web 登录态
-3. **自动 re-rank 闭环** — `feedback` → ranker → 下次 idea 生成
-4. **多语言** — 中/英/日自动翻译
-5. **评论自动回复** — agent 检测评论并自动互动
-6. **Web UI** — Vite + React 控制面板，调用 HTTP MCP server
+1. **多语言自动翻译** — 中/英/日自动翻译并按平台分发（TranslateAgent）
+2. **A/B 实验闭环** — IdeaAgent 同主题多 hook，发布携带 variantTag，`feedback` 按 variant 聚合
+3. **Web 控制面板** — Vite + React SPA，调用 HTTP MCP server
+4. **真实 channel 接入** — X/Twitter API + XHS web 登录态
+5. **评论自动回复** — AuditAgent 周期性抓 `engagement.comments[]`，让 DraftAgent 生成 ≤140 字回复
+6. **scheduler worker** — 取代 publish 阶段同步 post，改为 `ScheduleAgent` 仅算时间戳，post 由 worker 异步处理
+7. **per-content concurrency guard** — 同一 content 的多 platform worker 跑在并行任务上（`Promise.all`）

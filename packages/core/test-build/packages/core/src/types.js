@@ -30,6 +30,7 @@ export function createContent(opts) {
         posts: [],
         history: [],
         revisionCount: 0,
+        engagement: [],
         createdAt: now,
         updatedAt: now,
     };

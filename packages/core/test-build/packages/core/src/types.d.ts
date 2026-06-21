@@ -53,6 +53,15 @@ export type HistoryEntry = {
     at: string;
     note: string;
 };
+export type EngagementMetric = {
+    platform: PlatformId;
+    postId: string;
+    likes: number;
+    comments: number;
+    shares: number;
+    views: number;
+    fetchedAt: string;
+};
 export type Content = {
     id: string;
     topic: string;
@@ -66,6 +75,7 @@ export type Content = {
     posts: PostRecord[];
     history: HistoryEntry[];
     revisionCount: number;
+    engagement: EngagementMetric[];
     createdAt: string;
     updatedAt: string;
 };
