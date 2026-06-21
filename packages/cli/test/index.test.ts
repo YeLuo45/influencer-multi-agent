@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -189,6 +189,64 @@ test('cli: list, status, step, feedback and ab report read seeded content', asyn
     assert.equal(result.status, 0);
     assert.match(result.stdout, /AB report for seed/);
     assert.match(result.stdout, /\[ok\] winner=[AB]/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('cli: ab report exports json and markdown files', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'ima-cli-index-ab-export-'));
+  try {
+    await seedContent(root, 'seed');
+
+    let result = runCli(['ab', 'report', 'seed', '--json', '--out', 'reports/seed.json'], root);
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /wrote reports\/seed.json/);
+    assert.equal(existsSync(join(root, 'reports/seed.json')), true);
+    assert.match(readFileSync(join(root, 'reports/seed.json'), 'utf-8'), /"contentId": "seed"/);
+
+    result = runCli(['ab', 'report', 'seed', '--markdown', '--out', 'reports/seed.md'], root);
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /wrote reports\/seed.md/);
+    assert.match(readFileSync(join(root, 'reports/seed.md'), 'utf-8'), /# AB report for seed/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('cli: ab report honors npm_config flags without -- separator', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'ima-cli-index-ab-npmconfig-'));
+  try {
+    await seedContent(root, 'seed');
+    const result = spawnSync(process.execPath, ['--import', tsxLoader, cliEntry, 'ab', 'report', 'seed'], {
+      cwd: root,
+      encoding: 'utf-8',
+      env: { ...process.env, NODE_ENV: '', npm_config_json: 'true', npm_config_out: 'reports/from-env.json' },
+    });
+
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /wrote reports\/from-env.json/);
+    assert.equal(existsSync(join(root, 'reports/from-env.json')), true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('cli: ab report reattaches --out path when npm drops the flag from argv', async () => {
+  // npm 7+ without `--` collapses `--out reports/x.json` into
+  // `npm_config_out=true` and surfaces the path as a positional token.
+  const root = mkdtempSync(join(tmpdir(), 'ima-cli-index-ab-npmcollapsed-'));
+  try {
+    await seedContent(root, 'seed');
+    const result = spawnSync(process.execPath, ['--import', tsxLoader, cliEntry, 'ab', 'report', 'seed', 'reports/from-collapsed.json'], {
+      cwd: root,
+      encoding: 'utf-8',
+      env: { ...process.env, NODE_ENV: '', npm_config_out: 'true', npm_config_json: 'true' },
+    });
+
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /wrote reports\/from-collapsed.json/);
+    assert.equal(existsSync(join(root, 'reports/from-collapsed.json')), true);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

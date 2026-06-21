@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { MockLlm, OpenAICompatibleLlm, LlmError, createLlm } from '../src/llm.js';
+import { MockLlm, OpenAICompatibleLlm, LlmError, createLlm, isLlmUnavailableError } from '../src/llm.js';
 
 void test('MockLlm: implements Llm interface', () => {
   const llm = new MockLlm();
@@ -140,6 +140,27 @@ void test('OpenAICompatibleLlm: throws on API error envelope', async () => {
     maxRetries: 0,
   });
   await assert.rejects(() => llm.complete('x'), /rate limited/);
+});
+
+void test('OpenAICompatibleLlm: marks 429 as retryable unavailable error', async () => {
+  const fakeFetch = (async () =>
+    new Response('{"error":{"message":"quota exceeded"}}', { status: 429 })) as unknown as typeof fetch;
+  const llm = new OpenAICompatibleLlm({
+    endpoint: 'https://api.example.com/v1',
+    apiKey: 'k',
+    model: 'm',
+    fetchImpl: fakeFetch,
+    maxRetries: 0,
+  });
+  await assert.rejects(
+    () => llm.complete('x'),
+    (err) => {
+      assert.equal(isLlmUnavailableError(err), true);
+      assert.equal((err as { status?: number }).status, 429);
+      assert.equal((err as { retryable?: boolean }).retryable, true);
+      return true;
+    },
+  );
 });
 
 void test('OpenAICompatibleLlm: respects temperature option', async () => {

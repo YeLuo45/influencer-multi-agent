@@ -3,6 +3,8 @@ import { Pipeline, buildAbReport } from '@ima/core';
 import { PublishWorker, summarizeQueue } from './queue-worker.js';
 import { startWebServer } from './web-server.js';
 import { spawn as defaultSpawn, type SpawnOptions } from 'node:child_process';
+import { dirname, join } from 'node:path';
+import { mkdirSync, writeFileSync } from 'node:fs';
 
 // Local alias for `process.env`. Kept inline so this package compiles without
 // the shared `types/env.d.ts` ambient being pulled into its tsconfig.
@@ -69,13 +71,40 @@ const NPM_SCRIPT_TO_CMD: Record<string, string[]> = {
 
 export function readNpmPassthroughArgs(env: Env = process.env): string[] {
   const raw = env.npm_config_argv;
-  if (!raw) return [];
-  const parts = raw.split(/\s+/).filter(Boolean);
-  if (parts.length < 3) return [];
-  const scriptName = parts[2]!;
-  const userArgs = parts.slice(3);
-  const prefix = NPM_SCRIPT_TO_CMD[scriptName];
-  return prefix ? [...prefix, ...userArgs] : userArgs;
+  if (raw) {
+    const parts = raw.split(/\s+/).filter(Boolean);
+    if (parts.length < 3) return [];
+    const scriptName = parts[2]!;
+    const userArgs = parts.slice(3);
+    const prefix = NPM_SCRIPT_TO_CMD[scriptName];
+    const base = prefix ? [...prefix, ...userArgs] : userArgs;
+    // npm collapses `--out reports/foo.json` into `npm_config_out=true` plus a
+    // positional value. Detect those boolean flags and splice the value back in
+    // front of the corresponding positional token so downstream parsers see a
+    // canonical `--flag value` pair (boss preference: scripts work without `--`).
+    return restoreFlagValues(base, env);
+  }
+  // Fallback: npm 7+ without `--` may set `npm_config_<flag>=true` and drop
+  // the matching flag from process.argv. Rebuild canonical argv from the
+  // remaining process.argv tokens so CLI parsers stay deterministic.
+  return restoreFlagValues(process.argv.slice(2), env);
+}
+
+function restoreFlagValues(args: string[], env: Env): string[] {
+  const restored: string[] = [];
+  for (const arg of args) {
+    if (!arg.startsWith('--')) {
+      restored.push(arg);
+      continue;
+    }
+    if (env[`npm_config_${arg.slice(2).replace(/-/g, '_')}`] === 'true') {
+      restored.push(arg);
+      // value follows as the next positional token (if any)
+      continue;
+    }
+    restored.push(arg);
+  }
+  return restored;
 }
 
 export type SpawnFn = (
@@ -299,6 +328,20 @@ export async function runCli(argv: string[]): Promise<void> {
     const minSamplesArg = argv.indexOf('--min-samples');
     const minSamples = minSamplesArg >= 0 ? Number(argv[minSamplesArg + 1]) : 1;
     const report = buildAbReport(id, c.posts, c.engagement, { minSampleSize: minSamples, now: app.now() });
+    const outArg = argv.indexOf('--out');
+    const envOut = process.env.npm_config_out;
+    let outPath: string | undefined = outArg >= 0 ? argv[outArg + 1] : undefined;
+    if (!outPath && envOut && envOut !== 'true') outPath = envOut;
+    if (!outPath && envOut === 'true') {
+      // npm 7+ without `--` collapses `--out path` to npm_config_out=true and
+      // leaves the path as the last positional token. Reattach it explicitly.
+      const candidate = argv[argv.length - 1];
+      if (candidate && !candidate.startsWith('-') && (candidate.includes('/') || candidate.includes('.'))) {
+        outPath = candidate;
+      }
+    }
+    const wantsJson = argv.includes('--json') || process.env.npm_config_json === 'true';
+    const wantsMarkdown = argv.includes('--markdown') || process.env.npm_config_markdown === 'true';
     console.log(`AB report for ${id} (minSamples=${report.minSampleSize})`);
     console.log('variant  posts  samples  likes  comments  shares  views  score  winner');
     for (const v of report.variants) {
@@ -313,6 +356,13 @@ export async function runCli(argv: string[]): Promise<void> {
       console.log(`[ok] winner=${report.winner}`);
     } else {
       console.log(`[info] no winner (insufficient samples or tie within margin)`);
+    }
+    if (outPath) {
+      const target = join(process.cwd(), outPath);
+      mkdirSync(dirname(target), { recursive: true });
+      const body = wantsMarkdown && !wantsJson ? renderAbReportMarkdown(report) : JSON.stringify(report, null, 2);
+      writeFileSync(target, body, 'utf-8');
+      console.log(`[ok] wrote ${outPath}`);
     }
     return;
   }
@@ -383,6 +433,22 @@ function createEngagementInfo(): string {
   return 'tracker ready (MockEngagementTracker)';
 }
 
+function renderAbReportMarkdown(report: ReturnType<typeof buildAbReport>): string {
+  const lines = [
+    `# AB report for ${report.contentId}`,
+    '',
+    `- minSamples: ${report.minSampleSize}`,
+    `- winner: ${report.winner ?? 'none'}`,
+    '',
+    '| variant | posts | samples | likes | comments | shares | views | score |',
+    '|---|---:|---:|---:|---:|---:|---:|---:|',
+  ];
+  for (const v of report.variants) {
+    lines.push(`| ${v.variant} | ${v.postCount} | ${v.engagementCount} | ${v.likes} | ${v.comments} | ${v.shares} | ${v.views} | ${v.score.toFixed(1)} |`);
+  }
+  return `${lines.join('\n')}\n`;
+}
+
 function printHelp(): void {
   console.log(`ima — influencer multi-agent CLI
 
@@ -399,7 +465,7 @@ Usage:
   ima persona add <id> <name> [tone]    Add a new persona
   ima persona remove <id>               Remove a persona
   ima feedback                          Fetch engagement for all done contents
-  ima ab report <id> [--min-samples N]  Show A/B test report for a content
+  ima ab report <id> [--min-samples N] [--json|--markdown --out path]  Show/export A/B test report
   ima queue list                        List durable publish queue (.ima/queue)
   ima queue work [--limit N]            Run publish worker once (process due items)
   ima queue prune                       Remove dead-letter items from queue

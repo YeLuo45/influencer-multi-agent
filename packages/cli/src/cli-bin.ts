@@ -31,10 +31,11 @@ const passthrough = readNpmPassthroughArgs(env);
 // process.argv.slice(2) is already the real subcommand + flags.
 // When invoked through npm without `--`, the trailing tokens live in
 // npm_config_argv; readNpmPassthroughArgs has already extracted them.
-// Prefer the direct argv when present so direct invocation is deterministic,
-// and fall back to npm's passthrough otherwise.
+// Prefer the npm passthrough when present (it merges in positional values
+// that npm collapsed into npm_config_* env flags), and fall back to direct
+// argv otherwise.
 const direct = process.argv.slice(2);
-const finalArgv = direct.length > 0 ? direct : passthrough;
+const finalArgv = passthrough.length > 0 ? passthrough : direct;
 
 runCli(finalArgv).catch((e: Error) => {
   console.error(`[error] ${e.message}`);

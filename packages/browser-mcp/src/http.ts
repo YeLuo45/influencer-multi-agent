@@ -51,12 +51,19 @@ type AnyRes = {
   end: (chunk?: string) => void;
 };
 
+type SseSession = {
+  id: string;
+  res: AnyRes;
+  cleanup: () => void;
+};
+
 export class McpHttpServer {
   private readonly server: AnyServer;
   private readonly path: string;
   private readonly log: boolean;
   private readonly heartbeatMs: number;
   private readonly sessionMaxAgeMs: number;
+  private readonly sessions = new Map<string, SseSession>();
   private actualPort: number = 0;
   private listening = false;
 
@@ -109,6 +116,19 @@ export class McpHttpServer {
     return this.listening;
   }
 
+  sessionCount(): number {
+    return this.sessions.size;
+  }
+
+  sessionIds(): string[] {
+    return Array.from(this.sessions.keys()).sort();
+  }
+
+  /** Test helper: return live session descriptors in insertion order. */
+  getSessions(): Array<{ id: string; res: AnyRes; cleanup: () => void }> {
+    return Array.from(this.sessions.values()).map((s) => ({ id: s.id, res: s.res, cleanup: s.cleanup }));
+  }
+
   private async onRequest(req: AnyReq, res: AnyRes): Promise<void> {
     const url = req.url ?? '/';
     if (url === '/health' || url === `${this.path}/health`) {
@@ -128,6 +148,8 @@ export class McpHttpServer {
       return;
     }
     if (req.method === 'DELETE') {
+      const sessionId = headerValue(req.headers['mcp-session-id']);
+      if (sessionId) this.sessions.get(sessionId)?.cleanup();
       res.statusCode = 204;
       res.end();
       return;
@@ -195,10 +217,15 @@ export class McpHttpServer {
     const heartbeat = setInterval(() => {
       res.write(`event: ping\ndata: {}\n\n`);
     }, this.heartbeatMs);
+    let closed = false;
     const cleanup = () => {
+      if (closed) return;
+      closed = true;
       clearInterval(heartbeat);
+      this.sessions.delete(sessionId);
       res.end();
     };
+    this.sessions.set(sessionId, { id: sessionId, res, cleanup });
     req.on('close', cleanup);
     req.on('error', cleanup);
     setTimeout(cleanup, this.sessionMaxAgeMs);
@@ -209,6 +236,24 @@ export class McpHttpServer {
     res.setHeader('Content-Type', 'application/json');
     res.end(JSON.stringify(body));
   }
+}
+
+export function asHttpHandler(server: { handle(req: { jsonrpc: '2.0'; id: number; method: string; params?: Record<string, unknown> }): Promise<unknown> }): HttpMcpHandler {
+  return {
+    async handle(req): Promise<HttpMcpResponse> {
+      try {
+        const id = typeof req.id === 'string' ? Number(req.id) || 0 : (req.id ?? 0);
+        const result = await server.handle({ ...req, jsonrpc: '2.0', id });
+        return result as HttpMcpResponse;
+      } catch (e) {
+        return { jsonrpc: '2.0', id: req.id ?? null, error: { code: -32603, message: (e as Error).message } };
+      }
+    },
+  };
+}
+
+function headerValue(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
 }
 
 /** Internal helper to bridge node:http through a runtime indirection. */

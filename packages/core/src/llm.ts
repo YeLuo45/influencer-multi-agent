@@ -158,6 +158,12 @@ export class LlmError extends Error {
   }
 }
 
+export function isLlmUnavailableError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const meta = err as Error & { retryable?: boolean; status?: number };
+  return meta.retryable === true || meta.status === 429 || (typeof meta.status === 'number' && meta.status >= 500);
+}
+
 function inferProvider(endpoint: string): string {
   try {
     const u = new URL(endpoint);

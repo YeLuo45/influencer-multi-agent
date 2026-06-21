@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -62,6 +62,37 @@ test('createApp: tolerates corrupted feedback.json', () => {
     const app = createApp();
     assert.ok(app.pipeline);
     assert.ok(app.personas.get('default'));
+  } finally {
+    process.chdir(oldCwd);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('createApp: synchronously loads persisted custom personas', () => {
+  const root = mkdtempSync(join(tmpdir(), 'ima-cli-persona-sync-'));
+  const oldCwd = process.cwd();
+  try {
+    process.chdir(root);
+    mkdirSync(join(root, '.ima'), { recursive: true });
+    writeFileSync(join(root, '.ima/personas.json'), JSON.stringify({
+      ops: {
+        id: 'ops',
+        name: '运营专家',
+        tone: 'sharp',
+        targetAudience: 'founders',
+        signaturePhrases: ['直接说结论'],
+        bannedWords: ['震惊'],
+        defaultPlatforms: ['x'],
+        examples: ['一个爆款标题'],
+        createdAt: '2026-06-21T00:00:00.000Z',
+        updatedAt: '2026-06-21T00:00:00.000Z',
+      },
+    }));
+
+    const app = createApp();
+
+    assert.equal(app.personas.get('ops')?.name, '运营专家');
+    assert.equal(app.personas.count(), 4);
   } finally {
     process.chdir(oldCwd);
     rmSync(root, { recursive: true, force: true });

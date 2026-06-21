@@ -12,6 +12,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --import tsx test/*.test.ts",
     "start": "node --import tsx src/cli.ts",
     "start:http": "node --import tsx src/http-cli.ts"
   },

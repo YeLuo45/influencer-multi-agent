@@ -183,6 +183,40 @@ test('McpHttpServer: POST with text/event-stream accept → SSE', async () => {
   await http.stop();
 });
 
+test('McpHttpServer: tracks concurrent SSE sessions and DELETE closes them', async () => {
+  bindStub();
+  const http = new McpHttpServer({ async handle() { return { jsonrpc: '2.0', id: null }; } }, { heartbeatMs: 1000, sessionMaxAgeMs: 10000 });
+  await http.start(0);
+
+  const req1 = new StubReq();
+  req1.method = 'GET';
+  const res1 = new StubRes();
+  fire(http, req1, res1);
+  const req2 = new StubReq();
+  req2.method = 'GET';
+  const res2 = new StubRes();
+  fire(http, req2, res2);
+  await new Promise((r) => setImmediate(r));
+
+  assert.equal(http.sessionCount(), 2);
+  const sessions = http.getSessions();
+  assert.equal(sessions.length, 2);
+  assert.notEqual(sessions[0]!.id, sessions[1]!.id);
+
+  const del = new StubReq();
+  del.method = 'DELETE';
+  del.headers['mcp-session-id'] = sessions[0]!.id;
+  const delRes = new StubRes();
+  fire(http, del, delRes);
+  await new Promise((r) => setImmediate(r));
+
+  assert.equal(delRes.statusCode, 204);
+  assert.equal(http.sessionCount(), 1);
+  assert.equal(sessions[0]!.res.ended, true);
+  assert.equal(sessions[1]!.res.ended, false);
+  await http.stop();
+});
+
 test('McpHttpServer: handler throws → 500 error envelope', async () => {
   bindStub();
   const handler: HttpMcpHandler = {

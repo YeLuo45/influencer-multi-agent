@@ -115,14 +115,17 @@ function loadPersonas(store: JsonStore): PersonaRegistry {
   };
   reg.upsert(lifestylePersona);
 
-  // asynchronously merge user-defined personas
-  void store.read<Record<string, unknown>>('personas.json').then((p) => {
-    if (p && typeof p === 'object') {
-      for (const v of Object.values(p)) {
+  const personasPath = join(store.root, 'personas.json');
+  if (existsSync(personasPath)) {
+    try {
+      const persisted = JSON.parse(readFileSync(personasPath, 'utf-8')) as Record<string, unknown>;
+      for (const v of Object.values(persisted)) {
         if (v && typeof v === 'object') reg.upsert(v as Parameters<PersonaRegistry['upsert']>[0]);
       }
+    } catch {
+      // ignore corrupted persona files and keep defaults available
     }
-  });
+  }
   return reg;
 }
 

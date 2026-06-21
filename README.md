@@ -2,6 +2,15 @@
 
 多智能体跨平台大 V 全自动运营交付系统：根据网上热点生成内容并跨平台发布。
 
+## v0.7 新增（1+2+3+4 四个方向）
+
+| 方向 | 实现 |
+|---|---|
+| **1. 真实 LLM 失败路径 + persona 持久化回归** | `isLlmUnavailableError()` 标准化识别 429/5xx/retryable 错误；`createApp()` 改为同步加载 `.ima/personas.json`，避免 `persona add` 后下一条 CLI 命令读不到自定义 persona |
+| **2. Browser-MCP Streamable HTTP 多客户端并发** | `McpHttpServer` 维护 SSE session registry；`sessionCount()` / `sessionIds()` 可审计并发连接；`DELETE /mcp` 支持 `mcp-session-id` 定向关闭，避免 session 泄漏 |
+| **3. A/B report JSON/Markdown 导出** | `ima ab report <id> --json --out reports/x.json` 与 `--markdown --out reports/x.md` 可落盘，继续保留原表格输出；自动创建目标目录 |
+| **4. CI 覆盖率硬门禁 + artifact** | 新增 `.github/workflows/ci.yml`：`npm ci --include=dev` → `npm run check` → `npm test` → `npm run build` → `npm run coverage`，并上传 `coverage/` artifact |
+
 ## v0.6 新增（DX 打磨：1+2+3+4+5 五个方向）
 
 | 方向 | 实现 |
@@ -111,6 +120,8 @@ npm run cli run-ab <N> <topic>               # 跑 A/B 实验，N 个变体（>=
 npm run cli run-with-persona <id> <topic>    # 用指定 persona 创建并跑
 npm run cli feedback                         # 拉取所有 done content 的 engagement
 npm run cli ab report <id> [--min-samples N] # 表格化输出 A/B 胜出方
+npm run cli ab report <id> --json --out reports/<id>.json      # 导出 JSON 报告
+npm run cli ab report <id> --markdown --out reports/<id>.md    # 导出 Markdown 报告
 npm run queue:work                          # 同 queue work（可配 cron）
 npm run web [--port N] [--host addr] [--no-open]   # 启动 web（默认 127.0.0.1:5173；自动开浏览器除非 --no-open）
 npm run web 7777                              # 等价于 --port 7777（v0.6 新写法）
@@ -212,34 +223,36 @@ type Persona = {
 | B站 | 5000 字以内，三段式：标题/核心观点/互动 |
 | Reddit | 40000 字以内，长文讨论导向，CTA `What do you think?` |
 
-## 测试覆盖（v0.6）
+## 测试覆盖（v0.7）
 
-- **226/226 tests pass（100%）**
-- core: 144 tests（翻译/ab-test/ranker/publish-queue 等）
+- **245/245 tests pass（100%）**
+- core: 145 tests（新增 429/retryable LLM unavailable 分类）
 - crawler: 9 tests
+- browser-mcp: 14 tests（新增 concurrent SSE session + DELETE 定向关闭 + `getSessions()` 暴露；补齐 asHttpHandler 导出回归）
 - publisher: 30 tests（含 6 真实 channel × fetch/healthCheck 测试）
-- cli: 43 tests（v0.6 新增 parseWebOptions 边界 × 4、openBrowser 跨平台 × 2、readNpmPassthroughArgs × 1、cli-bin 集成 × 6）
-- 覆盖率门禁：`npm run coverage` 自动 `c8 --statements 95 --branches 75 --functions 85 --lines 95`，当前 95.33% / 81.12% / 95.88% / 95.33%
+- cli: 47 tests（新增 persona 同步持久化加载 + A/B JSON/Markdown 导出 + npm_config 折叠回退）
+- 覆盖率门禁：`npm run coverage` 自动 `c8 --statements 95 --branches 75 --functions 85 --lines 95`，当前 95.40% / 80.45% / 95.84% / 95.40%（browser-mcp/src/http.ts 本轮 96.94%）
 
-## 最新验收（2026-06-21 v0.6）
+## 最新验收（2026-06-21 v0.7）
 
 | 命令 | 结果 |
 |---|---|
-| `npm test` | 226/226 pass（core 144 / crawler 9 / publisher 30 / cli 43） |
-| `npm run coverage` | 95.33% lines/statements、81.12% branches、95.88% functions（c8 阈值通过） |
+| `npm test` | 245/245 pass（core 145 / crawler 9 / browser-mcp 14 / publisher 30 / cli 47） |
 | `npm run check` | 5 packages `tsc --noEmit` pass |
 | `npm run build` | 5 packages build pass |
-| `npm run cli list` | 列出 6 条 content，无 `--` 可用 |
-| `npm run cli status c1` | 输出 content JSON，无 `--` 可用 |
-| `npm run web 7777` | `GET /` 200 + `[ok] web console at http://127.0.0.1:7777`，无 `--` 可用 |
-| `npm run web --port 6677 --no-open` | 同上但跳过自动开浏览器 |
-| `npm run web 6666` | 失败 `[error] unsafe browser port: 6666. Chromium/Edge blocks this port; use 6677 or 7777 instead.` |
-| `npm run web --port 5060` | 同上（验证 npm_config_port 路径也走黑名单） |
-| `npm run web 10080` | 失败（也是 unsafe port 列表成员） |
-| `npm run cli queue list` | 列 6 个 queue item，全部 `posted` |
-| `npm run queue:work` | 跑 0（无 due），no-op |
-| `node --import tsx packages/cli/src/cli-bin.ts web 6678 --no-open` | 子进程 wrapper 启动 + 打印 banner（用于 cli-bin 集成测试） |
-| `packages/*/dist` | browser-mcp 24、cli 12、core 84、crawler 12、publisher 12 files |
+| `npm run coverage` | 95.40% lines/statements、80.45% branches、95.84% functions（c8 阈值通过） |
+| `npm run cli list` | 列出 6 条 content（无 `--` 可用） |
+| `npm run cli status c-08cf77b7` | 输出 content JSON（无 `--` 可用） |
+| `npm run cli persona list` | `default / lifestyle / tech-insight` 三条 |
+| `npm run cli queue list` | 32 个 item，全部 `posted` |
+| `npm run queue:work` | `[ok] scanned=32 processed=0 posted=0 retry=0 dead=0` |
+| `npm run cli feedback` | `[ok] fetched 32 engagement records; feedback.json now has 32 records (window-filtered)` |
+| `npm run cli ab report c-08cf77b7 --json --out reports/from-env.json`（无 `--`） | `[ok] wrote reports/from-env.json`（npm 折叠 `--out` 已自动恢复） |
+| `npm run cli ab report c-08cf77b7 --markdown --out reports/from-env.md`（无 `--`） | `[ok] wrote reports/from-env.md` |
+| `node --import tsx packages/cli/src/cli-bin.ts ab report c-08cf77b7 --json --out reports/direct.json`（直接 tsx） | `[ok] wrote reports/direct.json` |
+| `node --import tsx packages/browser-mcp/src/http-cli.ts` 启动 + `curl -X POST http://127.0.0.1:3000/mcp -H 'Content-Type: application/json' -H 'Accept: text/event-stream' -d '{"jsonrpc":"2.0","id":1,"method":"initialize"}'` | 返回 SSE `event: open`/`event: message` 双事件流（本轮 `startSseSession` 改动未破坏现有 stdio HTTP transport 行为） |
+| `packages/*/dist` | browser-mcp 24、cli 12、core 84、crawler 12、publisher 12 files（按包确认 `tsc` 产物） |
+| `.github/workflows/ci.yml` | 新增 `npm ci --include=dev` → check → test → build → coverage 五段式硬门禁 + `coverage-html` artifact |
 
 ## 参考
 
