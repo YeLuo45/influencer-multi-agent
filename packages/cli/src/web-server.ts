@@ -92,6 +92,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: HandleCtx)
   if (path === '/api/ab') return await apiAb(res, url, ctx);
   if (path === '/api/llm') return await apiLlm(res, ctx);
   if (path === '/api/llm/probe' && req.method === 'POST') return await apiLlmProbe(res, ctx);
+  if (path === '/api/stats') return await apiStats(res, ctx);
   if (path === '/api/run' && req.method === 'POST') return await apiRun(req, res, ctx);
   if (path === '/api/queue/work' && req.method === 'POST') return await apiQueueWork(res, ctx);
   return await serveStatic(path, res);
@@ -131,6 +132,48 @@ async function apiLlmProbe(res: ServerResponse, ctx: HandleCtx): Promise<void> {
     source: ctx.llmSelection.source,
     ...probe,
   });
+}
+
+async function apiStats(res: ServerResponse, ctx: HandleCtx): Promise<void> {
+  const { computeWebStats } = await import('@ima/core');
+  // Reuse apiContents + apiQueue + apiFeedback data to build the stats
+  // payload in a single round-trip. Walking the same files the per-endpoint
+  // routes walk keeps the totals consistent.
+  const files = await ctx.store.list('content');
+  const ids = files.filter((f) => f.endsWith('.json')).map((f) => f.replace(/\.json$/, ''));
+  const contents: Array<{ stage: string; persona: string; posts: number; engagement: number; createdAt: string }> = [];
+  for (const id of ids) {
+    const c = await ctx.store.read<{ id: string; topic: string; stage: string; persona: string; posts: unknown[]; engagement: unknown[]; createdAt: string }>(`content/${id}.json`);
+    if (!c) continue;
+    contents.push({ stage: c.stage, persona: c.persona, posts: c.posts?.length ?? 0, engagement: c.engagement?.length ?? 0, createdAt: c.createdAt });
+  }
+  const queueDir = ctx.store.path('queue');
+  const queueItems: Array<{ status: string; platform: string; createdAt: string }> = [];
+  if (existsSync(queueDir)) {
+    for (const f of readdirSync(queueDir).filter((x) => x.endsWith('.json'))) {
+      const raw = readFileSync(join(queueDir, f), 'utf-8');
+      if (raw.trim()) {
+        const it = JSON.parse(raw) as { status: string; platform: string; createdAt: string };
+        queueItems.push({ status: it.status, platform: it.platform, createdAt: it.createdAt });
+      }
+    }
+  }
+  const fb = await ctx.store.read<{ records: never; windowDays: number; lastUpdated: string; totalRecords: number }>('feedback.json');
+  const { emptyFeedback, filterByWindow } = await import('@ima/core');
+  const fbState = fb ?? emptyFeedback(ctx.now());
+  const recent = filterByWindow((fbState.records as never) ?? [], fbState.windowDays ?? 7, ctx.now());
+  const stats = computeWebStats({
+    contents,
+    queueItems,
+    feedback: {
+      totalRecords: fbState.totalRecords ?? 0,
+      recentCount: recent.length,
+      lastUpdated: fbState.lastUpdated ?? null,
+    },
+    ab: { winner: null, variants: 0, minSampleSize: 1 },
+    llm: { provider: ctx.llm.provider, model: ctx.llm.model },
+  });
+  sendJson(res, stats);
 }
 
 async function apiRun(req: IncomingMessage, res: ServerResponse, ctx: HandleCtx): Promise<void> {

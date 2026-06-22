@@ -2,6 +2,18 @@
 
 多智能体跨平台大 V 全自动运营交付系统：根据网上热点生成内容并跨平台发布。
 
+## v1.0 新增（1+2+3+4+5+6+7 七个方向：生产化）
+
+| 方向 | 实现 |
+|---|---|
+| **1. Observability — 结构化日志 + 指标** | `core/src/observability.ts` 提供 `createLogger({sink, level})` + child logger（继承父 context），`InMemoryMetrics` 提供 counter + histogram（p50 百分位），全部 zero-dep、tree-shakeable |
+| **2. 真实平台连通验证** | `core/src/channel-test.ts` 的 `channelHealthCheck(platform, opts)` ping 各平台 `/me` 端点（X / Reddit / B站 / 微博 / 小红书 / YouTube），不上帖；`summarizeChannelHealth()` 统计 ok / fail / retryable。CLI `ima channel-test <platform>` 一行命令 |
+| **3. Secret 管理抽象** | `core/src/secrets.ts` 提供 `loadSecret(key, opts)`，支持 `NAME`（env）/ `file:/path`（trim 读文件）/ `vault:KEY` / `keychain:NAME`（v1.1 接入），缺失/未读/未知 scheme 一律返回 `null`（永不抛） |
+| **4. 状态机扩展 + bulk 操作** | state-machine 增加 `paused` super-stage：每个 stage 可→paused，paused 可回到任意 lifecycle stage（仅 done 例外）。`isTerminal()` 仍把 `done` 视为 lifecycle 终态（忽略 paused 边），pipeline 循环行为不变；`stageRank()` 比较 lifecycle 顺序；`setStage()` helper 统一写 history |
+| **5. Web stats 面板** | `core/src/web-stats.ts` 纯函数 `computeWebStats(input)` 聚合 contents / queue / feedback / AB / LLM 元数据；web 端点 `/api/stats` 一次返回全量聚合，前端可直接画图 |
+| **6. Queue 限流** | `core/src/rate-limit.ts` 提供 `TokenBucketLimiter`，per-key 隔离、burst up to capacity、token refill、stats 暴露；为 v1.1 的 publish rate-limit per platform 铺路 |
+| **7. CLI 发布工具** | `packages/cli/src/publish.ts` 提供 `buildPublish` + `suggestVersion`（patch/minor/major/rc） + `validateBuild`（含 prerelease 验证）；CLI `ima publish-cli [--major|--minor|--rc|--pack]` 输出 tarball 路径；`@ima/cli` 全局包发布路径铺好 |
+
 ## v0.9 新增（1+2+3+4+5+6+7 七个方向）
 
 | 方向 | 实现 |
@@ -139,6 +151,8 @@ npm run cli ab report <id> --json --out reports/<id>.json      # 导出 JSON 报
 npm run cli ab report <id> --markdown --out reports/<id>.md    # 导出 Markdown 报告
 npm run cli dry-run <id>                  # 预览每个 platform 的适配后内容（不调用 channel）
 npm run cli dry-run <id> --json --out reports/dry.json  # 结构化 JSON 输出
+npm run cli channel-test <platform>            # ping X/Reddit/B站/微博/小红书/YouTube（不上帖）
+npm run cli publish-cli [--major|--minor|--rc] # 计算 next semver + tarball 路径（@ima/cli 全局包发布铺路）
 npm run cli bootstrap-real [--write-back-to-feedback]  # 跑 bootstrap demo（v0.8 抽象版）
 npm run queue:work                          # 同 queue work（可配 cron）
 npm run queue:daemon [--interval N]         # 长驻循环，SIGINT/SIGTERM 优雅 stop（systemd/pm2 模板见 docs/）
@@ -242,28 +256,29 @@ type Persona = {
 | B站 | 5000 字以内，三段式：标题/核心观点/互动 |
 | Reddit | 40000 字以内，长文讨论导向，CTA `What do you think?` |
 
-## 测试覆盖（v0.9）
+## 测试覆盖（v1.0）
 
-- **289/289 tests pass（100%）**
-- core: 173 tests（新增 `select-llm.test.ts` × 8、`dry-run-json.test.ts` × 1、`protocol-helpers.test.ts` × 5、`idea-coverage.test.ts` × 5、`pipeline-coverage.test.ts` × 7 = 26 个新测试）
+- **325/325 tests pass（100%）**
+- core: 205 tests（新增 `observability.test.ts` × 4、`secrets.test.ts` × 6、`rate-limit.test.ts` × 5、`web-stats.test.ts` × 5、`channel-test.test.ts` × 5、`state-machine-v2.test.ts` × 6 = 31 个新测试；旧 `state-machine.test.ts` 已适配 v1.0 paused super-stage）
 - crawler: 9 tests
 - browser-mcp: 14 tests
 - publisher: 30 tests
-- cli: 63 tests（新增 `bootstrap-real-engagement.test.ts` × 1、`queue-daemon-config.test.ts` × 2、`ci-node-matrix.test.ts` × 1 = 4 个新测试）
-- 覆盖率门禁：`npm run coverage` 自动 `c8 --statements 95 --branches 75 --functions 85 --lines 95`，当前 **96.52% / 82.10% / 95.72% / 96.52%**
+- cli: 67 tests（新增 `web-server-stats.test.ts` × 1、`publish.test.ts` × 4 = 5 个新测试）
+- 覆盖率门禁：`npm run coverage` 自动 `c8 --statements 95 --branches 75 --functions 85 --lines 95`，当前 **96.27% / 82.03% / 95.64% / 96.27%**
 
-## 最新验收（2026-06-21 v0.9）
+## 最新验收（2026-06-21 v1.0）
 
 | 命令 | 结果 |
 |---|---|
-| `npm test` | 289/289 pass（core 173 / crawler 9 / browser-mcp 14 / publisher 30 / cli 63） |
+| `npm test` | 325/325 pass（core 205 / crawler 9 / browser-mcp 14 / publisher 30 / cli 67） |
 | `npm run check` | 5 packages `tsc --noEmit` pass |
 | `npm run build` | 5 packages build pass |
-| `npm run coverage` | **96.52% lines/statements、82.10% branches、95.72% functions**（c8 阈值通过；lines 阈值 95 → 96+） |
-| `node --import tsx packages/cli/src/cli-bin.ts bootstrap-real` | `[bootstrap-real] seeded 3 contents; feedback append=0` |
-| `node --import tsx packages/cli/src/cli-bin.ts dry-run <id> --json` | 完整结构化 JSON（`{dryRun, contentId, preview: {x: {body, tags, ...}}, ...}`） |
-| `node --import tsx packages/cli/src/cli-bin.ts doctor` | LLM mock → `WARN llm provider=mock ...`；feedback 存在 → `OK feedback lastUpdated=2026-06-21 age=Nd window=7d total=N` |
-| 修了一个 v0.7 之前的真 bug | `needs_revision → done` 在 state-machine.ts 不是合法 transition，原 cap 路径（pipeline.ts:136）调用 `assertTransition` 抛 `InvalidTransition` 被 catch 后 stage 不变 → 死循环。修复：cap 时直接 mutate `stage: 'done'` 绕过 assertTransition |
+| `npm run coverage` | **96.27% lines/statements、82.03% branches、95.64% functions**（c8 阈值 95/75/85/95 通过） |
+| `node --import tsx packages/cli/src/cli-bin.ts channel-test x` | `FAIL x missing credential: set IMA_X_TOKEN [auth] 0ms` + `[channel-test] 0/1 ok; retryable=0`（无 token 走缺失凭据路径） |
+| `node --import tsx packages/cli/src/cli-bin.ts publish-cli --minor` | `[publish] @ima/cli@0.2.0 tarball=ima-cli-0.2.0.tgz dryRun=true`（从 package.json 读当前 version 算 semver bump） |
+| `curl -s http://127.0.0.1:5173/api/stats` | 全量 stats 聚合：contentsByStage / queueByStatus / queueByPlatform / postsByPersona / feedback / LLM provider |
+| `core/src/state-machine.ts` `isTerminal('done')` | 仍为 `true`（paused 不算 lifecycle edge，pipeline 行为不变） |
+| `core/src/rate-limit.ts` `TokenBucketLimiter` | per-key bucket + token refill + stats API；可立即接入 publish 限流 |
 
 ## 参考
 

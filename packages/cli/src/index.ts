@@ -276,6 +276,38 @@ export async function runCli(argv: string[]): Promise<void> {
     return;
   }
 
+  if (cmd === 'channel-test') {
+    const { channelHealthCheck, summarizeChannelHealth } = await import('@ima/core');
+    type ChannelHealth = { platform: string; ok: boolean; detail: string; latencyMs: number; status?: number; retryable?: boolean; skippedReason?: 'auth' | 'network' | 'unknown' };
+    const platform = argv[1];
+    if (!platform) throw new Error('usage: ima channel-test <x|reddit|xiaohongshu|weibo|bilibili|youtube>');
+    const envKey: Record<string, string> = {
+      x: 'IMA_X_TOKEN', reddit: 'IMA_REDDIT_TOKEN', xiaohongshu: 'IMA_XHS_TOKEN',
+      weibo: 'IMA_WEIBO_TOKEN', bilibili: 'IMA_BILIBILI_TOKEN', youtube: 'IMA_YOUTUBE_TOKEN',
+    };
+    const rows: ChannelHealth[] = [];
+    rows.push(await channelHealthCheck(platform, { credential: process.env[envKey[platform]!], envKey: envKey[platform]! }));
+    for (const r of rows) console.log(`${r.ok ? 'OK  ' : 'FAIL'}  ${r.platform.padEnd(12)}  ${r.detail}${r.status ? ` (${r.status})` : ''}${r.skippedReason ? ` [${r.skippedReason}]` : ''} ${r.latencyMs}ms`);
+    const s = summarizeChannelHealth(rows);
+    console.log(`[channel-test] ${s.okCount}/${s.total} ok; retryable=${s.retryableCount}`);
+    return;
+  }
+
+  if (cmd === 'publish-cli') {
+    const { buildPublish, suggestVersion, validateBuild } = await import('./publish.js');
+    const pkg = JSON.parse(await import('node:fs').then((m) => m.readFileSync('packages/cli/package.json', 'utf-8')));
+    const valid = validateBuild({ name: pkg.name, version: pkg.version });
+    if (!valid.ok) {
+      console.error(`[publish] ${valid.reason}`);
+      return;
+    }
+    const bump = (argv.includes('--major') ? 'major' : argv.includes('--minor') ? 'minor' : argv.includes('--rc') ? 'rc' : 'patch') as 'major' | 'minor' | 'rc' | 'patch';
+    const next = suggestVersion(pkg.version, bump);
+    const cfg = buildPublish({ name: pkg.name, version: next, dryRun: !argv.includes('--pack') });
+    console.log(`[publish] ${cfg.name}@${cfg.version} tarball=${cfg.tarball} dryRun=${cfg.dryRun}`);
+    return;
+  }
+
   if (cmd === 'doctor') {
     const rpt = await app.registry.doctor();
     for (const r of rpt) console.log(`${r.ok ? 'OK ' : 'FAIL'}  ${r.id.padEnd(12)}  ${r.detail}`);
