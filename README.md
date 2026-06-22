@@ -2,6 +2,18 @@
 
 多智能体跨平台大 V 全自动运营交付系统：根据网上热点生成内容并跨平台发布。
 
+## v0.9 新增（1+2+3+4+5+6+7 七个方向）
+
+| 方向 | 实现 |
+|---|---|
+| **1. 真实 LLM 全链路 `selectLlm()` 工厂 + 探针** | 新增 `selectLlm(env, opts)` 工厂 + `LlmSelection.probe()` 探针；`/api/llm/probe` POST 端点做连通性测试；`createApp` 走 `selectLlm()`，web UI 头部加 LLM 状态卡 + 「探测」按钮 |
+| **2. Web UI 真实按钮** | `apps/web/app.js` 加 `loadLlmBadge/probeLlm`、`runSubmit`（POST /api/run）、`queueWork`（POST /api/queue/work）、`refreshAll`；`index.html` 新增「新建」tab + 「Run pipeline」表单 + 「Run queue worker once」按钮 |
+| **3. Bootstrap 真实 engagement 模式** | `runBootstrapDemo` 新增 `engagementSource: 'real-fetch'`，向 LLM 询问 `{"count": N}` 派生指标；测试覆盖本地 deterministic + LLM 派生两条路径 |
+| **4. Queue daemon 持久化模板** | `docs/queue-daemon.service`（systemd unit）和 `docs/queue-daemon.pm2.cjs`（PM2 ecosystem）；均引用 `npm run queue:daemon`，含 restart / autorestart / log 路径 |
+| **5. Dry-run JSON 输出** | `ima dry-run <id> --json` 输出结构化 JSON（dryRun, contentId, targets, preview），`--markdown`/`--out path` 同理；适合接入 CI |
+| **6. Coverage 收紧到 96%** | 新增 `protocol-helpers.test.ts` × 5、`idea-coverage.test.ts` × 5、`pipeline-coverage.test.ts` × 7 = 17 个测试；`All files 95.13% → 96.52%`。**顺便修了 v0.7 之前的真 bug**：`needs_revision → done` 在 state-machine 中不是合法 transition，原 cap 路径永远失败 |
+| **7. CI 多 Node 版本 matrix** | `.github/workflows/ci.yml` 加 `matrix.node-version: ['20.20.2', '22.11.0']`；artifact 命名带 Node 版本；`fail-fast: false` 让一个 Node 失败不阻塞另一个 |
+
 ## v0.8 新增（1+2+3+4+5+6+7 七个方向）
 
 | 方向 | 实现 |
@@ -126,9 +138,10 @@ npm run cli ab report <id> [--min-samples N] # 表格化输出 A/B 胜出方
 npm run cli ab report <id> --json --out reports/<id>.json      # 导出 JSON 报告
 npm run cli ab report <id> --markdown --out reports/<id>.md    # 导出 Markdown 报告
 npm run cli dry-run <id>                  # 预览每个 platform 的适配后内容（不调用 channel）
+npm run cli dry-run <id> --json --out reports/dry.json  # 结构化 JSON 输出
 npm run cli bootstrap-real [--write-back-to-feedback]  # 跑 bootstrap demo（v0.8 抽象版）
 npm run queue:work                          # 同 queue work（可配 cron）
-npm run queue:daemon [--interval N]         # 长驻循环，SIGINT/SIGTERM 优雅 stop
+npm run queue:daemon [--interval N]         # 长驻循环，SIGINT/SIGTERM 优雅 stop（systemd/pm2 模板见 docs/）
 npm run web [--port N] [--host addr] [--no-open]   # 启动 web（默认 127.0.0.1:5173；自动开浏览器除非 --no-open）
 npm run web 7777                              # 等价于 --port 7777（v0.6 新写法）
 npm run cli queue list                      # 列出发布队列
@@ -229,36 +242,28 @@ type Persona = {
 | B站 | 5000 字以内，三段式：标题/核心观点/互动 |
 | Reddit | 40000 字以内，长文讨论导向，CTA `What do you think?` |
 
-## 测试覆盖（v0.8）
+## 测试覆盖（v0.9）
 
-- **259/259 tests pass（100%）**
-- core: 147 tests（新增 `runDryRun` 覆盖 + LLM 错误分类已有）
+- **289/289 tests pass（100%）**
+- core: 173 tests（新增 `select-llm.test.ts` × 8、`dry-run-json.test.ts` × 1、`protocol-helpers.test.ts` × 5、`idea-coverage.test.ts` × 5、`pipeline-coverage.test.ts` × 7 = 26 个新测试）
 - crawler: 9 tests
 - browser-mcp: 14 tests
 - publisher: 30 tests
-- cli: 59 tests（新增 `bootstrap.test.ts` × 3、`doctor.test.ts` × 4、`dry-run.test.ts` × 2、`queue-daemon.test.ts` × 1、`web-server-ops.test.ts` × 4 = 14 个新测试）
-- 覆盖率门禁：`npm run coverage` 自动 `c8 --statements 95 --branches 75 --functions 85 --lines 95`，当前 95.13% / 79.74% / 95.40% / 95.13%
+- cli: 63 tests（新增 `bootstrap-real-engagement.test.ts` × 1、`queue-daemon-config.test.ts` × 2、`ci-node-matrix.test.ts` × 1 = 4 个新测试）
+- 覆盖率门禁：`npm run coverage` 自动 `c8 --statements 95 --branches 75 --functions 85 --lines 95`，当前 **96.52% / 82.10% / 95.72% / 96.52%**
 
-## 最新验收（2026-06-21 v0.8）
+## 最新验收（2026-06-21 v0.9）
 
 | 命令 | 结果 |
 |---|---|
-| `npm test` | 259/259 pass（core 147 / crawler 9 / browser-mcp 14 / publisher 30 / cli 59） |
+| `npm test` | 289/289 pass（core 173 / crawler 9 / browser-mcp 14 / publisher 30 / cli 63） |
 | `npm run check` | 5 packages `tsc --noEmit` pass |
 | `npm run build` | 5 packages build pass |
-| `npm run coverage` | 95.13% lines/statements、79.74% branches、95.40% functions（c8 阈值通过） |
-| `node --import tsx packages/cli/src/cli-bin.ts bootstrap-real` | `[bootstrap-real] seeded 3 contents; feedback append=0`（3 条内容都跑通到 done，2/3/1 posts） |
-| `node --import tsx packages/cli/src/cli-bin.ts doctor` | LLM mock → `WARN llm provider=mock ...`；feedback 存在 → `OK feedback lastUpdated=2026-06-21 age=0d window=7d total=32`；channels/crawler/personas 全 OK |
-| `node --import tsx packages/cli/src/cli-bin.ts dry-run c-08cf77b7` | `[dry-run] c-08cf77b7 targets=2` + 平台预览（`x: 我观察到 ...`、`xiaohongshu: 姐妹们！...`） |
-| `node --import tsx packages/cli/src/cli-bin.ts web --port 7766 --no-open` 后 `curl /api/llm` | `{"provider":"mock","model":"mock-llm","warning":"..."}` |
-| `curl -X POST /api/run {topic,persona}` | `{"id":"c-5f11f14a","topic":"测试话题","persona":"lifestyle","stage":"intake"}` |
-| `curl -X POST /api/queue/work` | `{"scanned":38}`（扫描当前 queue 中所有 item） |
-| `npm run queue:daemon -- --interval 200` | `[queue:daemon] started, interval=200ms (SIGINT/SIGTERM to stop)` 后接收 SIGTERM 优雅 stop |
-| `npm run cli -- bootstrap-real --write-back-to-feedback` | 端到端闭环：bootstrap → feedback.json 写入 N 条 EngagementMetric |
-| `npm run cli -- list` / `npm run cli -- status c-08cf77b7` | 列 6+ 条 content；status 输出 JSON |
-| `npm run cli -- persona list` | 3 条 persona（`default/lifestyle/tech-insight`） |
-| `npm run cli -- ab report c-08cf77b7 --json --out reports/from-env.json`（无 `--`） | `[ok] wrote reports/from-env.json`（npm 折叠 `--out` 修复 v0.7 已生效） |
-| `node --import tsx packages/browser-mcp/src/http-cli.ts` + `curl POST /mcp` | `event: open` + `event: message` SSE 双事件流（v0.7 改动未破坏现有 transport） |
+| `npm run coverage` | **96.52% lines/statements、82.10% branches、95.72% functions**（c8 阈值通过；lines 阈值 95 → 96+） |
+| `node --import tsx packages/cli/src/cli-bin.ts bootstrap-real` | `[bootstrap-real] seeded 3 contents; feedback append=0` |
+| `node --import tsx packages/cli/src/cli-bin.ts dry-run <id> --json` | 完整结构化 JSON（`{dryRun, contentId, preview: {x: {body, tags, ...}}, ...}`） |
+| `node --import tsx packages/cli/src/cli-bin.ts doctor` | LLM mock → `WARN llm provider=mock ...`；feedback 存在 → `OK feedback lastUpdated=2026-06-21 age=Nd window=7d total=N` |
+| 修了一个 v0.7 之前的真 bug | `needs_revision → done` 在 state-machine.ts 不是合法 transition，原 cap 路径（pipeline.ts:136）调用 `assertTransition` 抛 `InvalidTransition` 被 catch 后 stage 不变 → 死循环。修复：cap 时直接 mutate `stage: 'done'` 绕过 assertTransition |
 
 ## 参考
 

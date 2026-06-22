@@ -10,8 +10,14 @@
   <header class="hdr">
     <div class="hdr-inner">
       <h1>IMA 控制台</h1>
+      <div class="hdr-status">
+        <span id="llm-badge" class="badge llm-badge">LLM: …</span>
+        <button id="llm-probe" class="btn-secondary" title="Ping the configured LLM endpoint">探测</button>
+        <button id="refresh-all" class="btn-secondary" title="Refresh all panels">刷新</button>
+      </div>
       <nav class="tabs" role="tablist">
         <button data-tab="contents" class="tab active">内容</button>
+        <button data-tab="run" class="tab">新建</button>
         <button data-tab="queue" class="tab">发布队列</button>
         <button data-tab="feedback" class="tab">反馈</button>
         <button data-tab="ab" class="tab">A/B 报告</button>
@@ -22,6 +28,23 @@
     <section id="view-contents" class="view active">
       <h2>内容列表</h2>
       <div id="content-list" class="card-list"></div>
+    </section>
+    <section id="view-run" class="view">
+      <h2>新建内容</h2>
+      <div class="run-form">
+        <label>主题
+          <input id="run-topic" type="text" placeholder="例如：AI Agent 趋势" />
+        </label>
+        <label>Persona（可选）
+          <input id="run-persona" type="text" placeholder="tech-insight / lifestyle / default" />
+        </label>
+        <button id="run-submit" class="btn-primary">Run pipeline</button>
+        <pre id="run-output" class="pre"></pre>
+      </div>
+      <div class="queue-actions">
+        <button id="queue-work" class="btn-secondary">Run queue worker once</button>
+        <span id="queue-work-status" class="hint"></span>
+      </div>
     </section>
     <section id="view-queue" class="view">
       <h2>发布队列</h2>

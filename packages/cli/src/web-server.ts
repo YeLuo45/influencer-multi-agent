@@ -17,7 +17,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'http';
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join, resolve } from 'path';
 import { fileURLToPath } from 'url';
-import { JsonStore, buildAbReport } from '@ima/core';
+import { JsonStore, buildAbReport, selectLlm, type LlmSelection } from '@ima/core';
 
 // Resolve apps/web/ relative to this file. web-server.ts lives at
 // packages/cli/src/web-server.ts → up two levels to packages/cli/, then up
@@ -31,6 +31,12 @@ export interface WebServerOptions {
   now?: () => string;
   /** Optional LLM metadata exposed via /api/llm. */
   llm?: { provider: string; model: string };
+  /**
+   * Optional LLM selection. When provided, /api/llm/probe can ping the
+   * configured endpoint to surface a real connectivity check in the
+   * web console.
+   */
+  llmSelection?: LlmSelection;
 }
 
 export interface WebServerHandle {
@@ -43,10 +49,11 @@ export async function startWebServer(opts: WebServerOptions): Promise<WebServerH
   const requestedPort = opts.port ?? 5173;
   const now = opts.now ?? (() => new Date().toISOString());
   const llm = opts.llm ?? { provider: 'mock', model: 'mock-llm' };
+  const llmSelection = opts.llmSelection ?? selectLlm();
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     try {
-      await handle(req, res, { store: opts.store, now, llm });
+      await handle(req, res, { store: opts.store, now, llm, llmSelection });
     } catch (e: unknown) {
       send(res, 500, 'application/json', JSON.stringify({ error: (e as Error).message }));
     }
@@ -72,6 +79,7 @@ interface HandleCtx {
   store: JsonStore;
   now: () => string;
   llm: { provider: string; model: string };
+  llmSelection: LlmSelection;
 }
 
 async function handle(req: IncomingMessage, res: ServerResponse, ctx: HandleCtx): Promise<void> {
@@ -83,6 +91,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: HandleCtx)
   if (path === '/api/feedback') return await apiFeedback(res, ctx);
   if (path === '/api/ab') return await apiAb(res, url, ctx);
   if (path === '/api/llm') return await apiLlm(res, ctx);
+  if (path === '/api/llm/probe' && req.method === 'POST') return await apiLlmProbe(res, ctx);
   if (path === '/api/run' && req.method === 'POST') return await apiRun(req, res, ctx);
   if (path === '/api/queue/work' && req.method === 'POST') return await apiQueueWork(res, ctx);
   return await serveStatic(path, res);
@@ -109,7 +118,18 @@ async function apiLlm(res: ServerResponse, ctx: HandleCtx): Promise<void> {
   sendJson(res, {
     provider: ctx.llm.provider,
     model: ctx.llm.model,
+    source: ctx.llmSelection.source,
     ...(ctx.llm.provider === 'mock' ? { warning: 'mock-llm — configure IMA_LLM_ENDPOINT/KEY/MODEL for production' } : {}),
+  });
+}
+
+async function apiLlmProbe(res: ServerResponse, ctx: HandleCtx): Promise<void> {
+  const probe = await ctx.llmSelection.probe();
+  sendJson(res, {
+    provider: ctx.llm.provider,
+    model: ctx.llm.model,
+    source: ctx.llmSelection.source,
+    ...probe,
   });
 }
 

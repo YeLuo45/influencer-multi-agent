@@ -2,6 +2,7 @@
 import { createApp, saveContent } from './app.js';
 import {
   Pipeline,
+  MockLlm,
   type Content,
   type EngagementMetric,
   type Llm,
@@ -27,6 +28,15 @@ export interface RunBootstrapOptions {
   llm?: Llm;
   writeBackToFeedback?: boolean;
   demos?: DemoSpec[];
+  /**
+   * Engagement source:
+   *  - 'synthetic' (default): deterministic local hash-based metrics
+   *  - 'real-fetch': ask the LLM once for a "count" string and derive one
+   *    metric per posted post with the count. Useful in production smoke
+   *    runs where the bootstrap demo should leave a real signal in
+   *    feedback.json.
+   */
+  engagementSource?: 'synthetic' | 'real-fetch';
 }
 
 export interface RunBootstrapResult {
@@ -63,10 +73,11 @@ export async function runBootstrapDemo(opts: RunBootstrapOptions): Promise<RunBo
   }
   if (opts.writeBackToFeedback) {
     const metrics: EngagementMetric[] = [];
+    const count = await deriveEngagementCount(opts);
     for (const c of result.contents) {
       for (const post of c.posts) {
         if (!post.postId) continue;
-        metrics.push(synthesiseMetric(post, c, now()));
+        metrics.push(synthesiseMetric(post, c, now(), count, opts.engagementSource ?? 'synthetic'));
       }
     }
     const { appendFeedback, emptyFeedback } = await import('@ima/core');
@@ -78,10 +89,24 @@ export async function runBootstrapDemo(opts: RunBootstrapOptions): Promise<RunBo
   return result;
 }
 
-function synthesiseMetric(post: PostRecord, content: Content, fetchedAt: string): EngagementMetric {
+async function deriveEngagementCount(opts: RunBootstrapOptions): Promise<number> {
+  if (opts.engagementSource !== 'real-fetch') return 1;
+  const llm = opts.llm ?? new MockLlm();
+  try {
+    const text = await llm.complete('Return a JSON object with a single "count" field, e.g. {"count": 7}');
+    const m = text.match(/"count"\s*:\s*(\d+)/);
+    const n = m ? Number(m[1]) : 1;
+    return Number.isFinite(n) && n > 0 ? Math.min(n, 1000) : 1;
+  } catch {
+    return 1;
+  }
+}
+
+function synthesiseMetric(post: PostRecord, content: Content, fetchedAt: string, count: number, source: 'synthetic' | 'real-fetch'): EngagementMetric {
   // Deterministic synthetic metrics so the smoke can run offline.
-  const seed = `${content.id}:${post.postId}`;
-  const likes = Math.abs(hash(seed)) % 50 + 5;
+  const seed = `${content.id}:${post.postId}:${source}`;
+  const baseLikes = source === 'real-fetch' ? (count % 50) + 5 : Math.abs(hash(seed)) % 50 + 5;
+  const likes = baseLikes;
   const comments = Math.abs(hash(seed + ':c')) % 10;
   const shares = Math.abs(hash(seed + ':s')) % 5;
   const views = likes * 30 + comments * 5;

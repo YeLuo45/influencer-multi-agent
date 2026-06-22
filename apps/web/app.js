@@ -8,11 +8,21 @@ const els = {
   abContentId: document.getElementById('ab-content-id'),
   abLoad: document.getElementById('ab-load'),
   abOutput: document.getElementById('ab-output'),
+  runTopic: document.getElementById('run-topic'),
+  runPersona: document.getElementById('run-persona'),
+  runSubmit: document.getElementById('run-submit'),
+  runOutput: document.getElementById('run-output'),
+  queueWork: document.getElementById('queue-work'),
+  queueWorkStatus: document.getElementById('queue-work-status'),
+  refreshAll: document.getElementById('refresh-all'),
+  llmBadge: document.getElementById('llm-badge'),
+  llmProbe: document.getElementById('llm-probe'),
 };
 
 const tabs = document.querySelectorAll('.tab');
 const views = {
   contents: document.getElementById('view-contents'),
+  run: document.getElementById('view-run'),
   queue: document.getElementById('view-queue'),
   feedback: document.getElementById('view-feedback'),
   ab: document.getElementById('view-ab'),
@@ -40,10 +50,56 @@ function badge(text, kind) {
   return `<span class="badge ${escapeHtml(kind ?? '')}">${escapeHtml(text)}</span>`;
 }
 
-async function fetchJson(url) {
-  const r = await fetch(url);
+async function fetchJson(url, opts) {
+  const r = await fetch(url, opts);
   if (!r.ok) throw new Error(`${url} ${r.status}`);
   return r.json();
+}
+
+async function postJson(url, body) {
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+  });
+  const text = await r.text();
+  let json;
+  try { json = JSON.parse(text); } catch { json = { raw: text }; }
+  if (!r.ok) throw new Error(`${url} ${r.status}: ${json.error ?? text}`);
+  return json;
+}
+
+async function loadLlmBadge() {
+  try {
+    const r = await fetchJson('/api/llm');
+    const mock = r.provider === 'mock';
+    els.llmBadge.textContent = mock ? `LLM: mock (${r.model})` : `LLM: ${r.provider} · ${r.model}`;
+    els.llmBadge.className = `badge llm-badge ${mock ? 'mock' : 'live'}`;
+    els.llmBadge.title = r.warning ?? '';
+  } catch (e) {
+    els.llmBadge.textContent = 'LLM: error';
+    els.llmBadge.className = 'badge llm-badge fail';
+    els.llmBadge.title = String(e);
+  }
+}
+
+async function probeLlm() {
+  els.llmBadge.textContent = 'LLM: probing…';
+  els.llmBadge.className = 'badge llm-badge';
+  try {
+    const r = await postJson('/api/llm/probe', {});
+    if (r.ok) {
+      els.llmBadge.textContent = `LLM: ${r.provider} ok ${r.latencyMs}ms`;
+      els.llmBadge.className = 'badge llm-badge live';
+    } else {
+      const tail = r.status ? ` (${r.status})` : '';
+      els.llmBadge.textContent = `LLM: unreachable${tail}`;
+      els.llmBadge.className = 'badge llm-badge fail';
+    }
+  } catch (e) {
+    els.llmBadge.textContent = `LLM: probe error`;
+    els.llmBadge.className = 'badge llm-badge fail';
+  }
 }
 
 async function loadContents() {
@@ -132,8 +188,40 @@ async function loadAbReport(id) {
 
 els.abLoad.addEventListener('click', () => loadAbReport(els.abContentId.value.trim()));
 
+els.runSubmit.addEventListener('click', async () => {
+  const topic = els.runTopic.value.trim();
+  if (!topic) {
+    els.runOutput.textContent = '[error] topic is required';
+    return;
+  }
+  const persona = els.runPersona.value.trim();
+  els.runOutput.textContent = '[ok] running pipeline…';
+  try {
+    const r = await postJson('/api/run', { topic, ...(persona ? { persona } : {}) });
+    els.runOutput.textContent = `[ok] created ${r.id} (stage=${r.stage}, persona=${r.persona})`;
+    await loadContents();
+  } catch (e) {
+    els.runOutput.textContent = `[error] ${e.message}`;
+  }
+});
+
+els.queueWork.addEventListener('click', async () => {
+  els.queueWorkStatus.textContent = 'running…';
+  try {
+    const r = await postJson('/api/queue/work', {});
+    els.queueWorkStatus.textContent = `[ok] scanned=${r.scanned}`;
+    await loadQueue();
+  } catch (e) {
+    els.queueWorkStatus.textContent = `[error] ${e.message}`;
+  }
+});
+
+els.refreshAll.addEventListener('click', () => main());
+els.llmProbe.addEventListener('click', () => probeLlm());
+
 async function main() {
   try {
+    await loadLlmBadge();
     await loadContents();
     await loadQueue();
     await loadFeedback();

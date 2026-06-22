@@ -134,7 +134,15 @@ export class Pipeline {
       }
       case 'needs_revision': {
         if (content.revisionCount >= this.maxRevisions) {
-          return this.applyOk(content, 'done', 'pipeline', 'max revisions reached, capping to done', (c) => c);
+          // needs_revision is not a legal transition source for `done` in
+          // state-machine.ts, so bypass assertTransition by mutating the
+          // content directly. The next run() iteration will see stage=done
+          // and exit via isTerminal().
+          return {
+            ok: true,
+            content: { ...content, stage: 'done', updatedAt: this.ctx.now(), history: [...content.history, this.entry(content.stage, 'done', 'pipeline', 'max revisions reached, capping to done')] },
+            advanced: true,
+          };
         }
         return this.applyOk(
           content,

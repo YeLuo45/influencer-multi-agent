@@ -164,6 +164,100 @@ export function isLlmUnavailableError(err: unknown): boolean {
   return meta.retryable === true || meta.status === 429 || (typeof meta.status === 'number' && meta.status >= 500);
 }
 
+export interface LlmProbeInput {
+  ping?: string;
+  fetchImpl?: typeof fetch;
+  signal?: AbortSignal;
+}
+
+export interface LlmProbeResult {
+  ok: boolean;
+  reachable: boolean;
+  retryable: boolean;
+  status?: number;
+  latencyMs: number;
+  sample?: string;
+  error?: string;
+}
+
+export interface LlmSelection {
+  source: 'env' | 'mock' | 'override';
+  llm: Llm;
+  warning?: string;
+  probe(input?: LlmProbeInput): Promise<LlmProbeResult>;
+}
+
+/**
+ * Build the active LLM with a single source of truth. Honours
+ * IMA_LLM_ENDPOINT / IMA_LLM_KEY / IMA_LLM_MODEL env vars. Falls back to
+ * MockLlm if any of the three is missing, surfacing a warning so the
+ * caller can surface it (e.g. in `ima doctor` or the web console).
+ *
+ * The returned `probe()` performs a tiny ping against the configured
+ * endpoint and reports latency / status. It is **non-fatal** — production
+ * LLM usage can proceed even if a probe fails (e.g. offline smoke test).
+ */
+export interface SelectLlmOptions {
+  /** Force a specific LLM impl, bypassing the env check. */
+  override?: Llm;
+  /** Inject a custom fetch (useful for tests + offline smoke runs). */
+  fetchImpl?: typeof fetch;
+}
+
+export function selectLlm(env: Env = process.env as Env, opts: SelectLlmOptions = {}): LlmSelection {
+  if (opts.override) {
+    return {
+      source: 'override',
+      llm: opts.override,
+      probe: async () => ({ ok: true, reachable: true, retryable: false, latencyMs: 0 }),
+    };
+  }
+  const endpoint = env.IMA_LLM_ENDPOINT;
+  const apiKey = env.IMA_LLM_KEY;
+  const model = env.IMA_LLM_MODEL;
+  if (endpoint && apiKey && model) {
+    const llm = new OpenAICompatibleLlm({ endpoint, apiKey, model, ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}) });
+    return {
+      source: 'env',
+      llm,
+      probe: (input) => probeLlm(llm, input),
+    };
+  }
+  const missing: string[] = [];
+  if (!endpoint) missing.push('IMA_LLM_ENDPOINT');
+  if (!apiKey) missing.push('IMA_LLM_KEY');
+  if (!model) missing.push('IMA_LLM_MODEL');
+  return {
+    source: 'mock',
+    llm: new MockLlm(),
+    warning: `${missing.join('/')} not set — using mock LLM`,
+    probe: async () => ({ ok: false, reachable: false, retryable: false, latencyMs: 0, error: 'mock LLM has no live endpoint to probe' }),
+  };
+}
+
+async function probeLlm(llm: Llm, input: LlmProbeInput = {}): Promise<LlmProbeResult> {
+  const start = Date.now();
+  if (!(llm instanceof OpenAICompatibleLlm)) {
+    return { ok: false, reachable: false, retryable: false, latencyMs: Date.now() - start, error: 'probe only available for OpenAICompatibleLlm' };
+  }
+  try {
+    const sample = await llm.complete(input.ping ?? 'ping', { maxTokens: 8, temperature: 0 });
+    return { ok: true, reachable: true, retryable: false, latencyMs: Date.now() - start, sample: sample.slice(0, 64) };
+  } catch (e) {
+    const meta = e as Error & { status?: number; retryable?: boolean };
+    const status = meta.status;
+    const retryable = isLlmUnavailableError(e);
+    return {
+      ok: false,
+      reachable: status !== undefined,
+      retryable,
+      ...(status !== undefined ? { status } : {}),
+      latencyMs: Date.now() - start,
+      error: (e as Error).message,
+    };
+  }
+}
+
 function inferProvider(endpoint: string): string {
   try {
     const u = new URL(endpoint);
@@ -172,6 +266,8 @@ function inferProvider(endpoint: string): string {
     return 'unknown';
   }
 }
+
+type Env = Record<string, string | undefined>;
 
 function isRetryable(err: Error): boolean {
   const r = (err as Error & { retryable?: boolean }).retryable;

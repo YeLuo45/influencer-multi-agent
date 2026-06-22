@@ -252,6 +252,10 @@ export async function runCli(argv: string[]): Promise<void> {
     const id = argv[1];
     if (!id) throw new Error('id required: ima dry-run <id>');
     const r = await runDryRun({ store: app.store, id, registry: app.registry });
+    if (argv.includes('--json')) {
+      console.log(JSON.stringify(r, null, 2));
+      return;
+    }
     if (r.error) {
       console.log(`[dry-run] ${id} error: ${r.error}`);
       return;
