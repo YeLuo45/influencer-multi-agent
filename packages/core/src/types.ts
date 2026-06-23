@@ -103,6 +103,8 @@ export type EngagementMetric = {
   shares: number;
   views: number;
   fetchedAt: string;
+  /** Optional raw comment texts for reply-draft automation. */
+  commentTexts?: string[];
   /** Optional A/B test variant tag carried over from the source post. */
   variantTag?: string;
 };

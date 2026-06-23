@@ -2,6 +2,7 @@ import { createApp, saveContent, listContentIds, loadContent, savePersonas, fetc
 import { Pipeline, buildAbReport, runDryRun } from '@ima/core';
 import { PublishWorker, summarizeQueue } from './queue-worker.js';
 import { startWebServer } from './web-server.js';
+import { buildCliSandboxPublishPlan, createCliLocalSecretVault, redactSecret } from './v12-helpers.js';
 import { spawn as defaultSpawn, type SpawnOptions } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -265,6 +266,53 @@ export async function runCli(argv: string[]): Promise<void> {
       const tag = preview?.variantTag ? ` (${preview.variantTag})` : '';
       console.log(`  ${platform}${tag}: ${preview?.body?.slice(0, 60) ?? ''}${preview && preview.body && preview.body.length > 60 ? '...' : ''} [${preview?.tags?.join(',') ?? ''}]`);
     }
+    return;
+  }
+
+  if (cmd === 'secret') {
+    const sub = argv[1];
+    const key = argv[2];
+    const vault = createCliLocalSecretVault({ rootDir: process.cwd(), passphrase: process.env.IMA_SECRET_PASSPHRASE });
+    if (sub === 'set') {
+      const value = argv[3];
+      if (!key || value === undefined) throw new Error('usage: ima secret set <KEY> <VALUE>');
+      vault.set(key, value);
+      console.log(`secret set: ${key}`);
+      return;
+    }
+    if (sub === 'get') {
+      if (!key) throw new Error('usage: ima secret get <KEY>');
+      const value = vault.get(key);
+      if (!value) throw new Error(`secret not found: ${key}`);
+      console.log(`${key}=${redactSecret(value)}`);
+      return;
+    }
+    if (sub === 'list') {
+      for (const item of vault.list()) console.log(`${item.key}  ${item.redacted}`);
+      return;
+    }
+    throw new Error('usage: ima secret <set|get|list>');
+  }
+
+  if (cmd === 'publish-test') {
+    const platform = argv[1];
+    if (!platform) throw new Error('usage: ima publish-test <platform> --sandbox --title T --body B');
+    const title = valueAfterFlag(argv, '--title') ?? 'Sandbox publish test';
+    const body = valueAfterFlag(argv, '--body') ?? 'Sandbox body';
+    const sandbox = argv.includes('--sandbox');
+    const plan = buildCliSandboxPublishPlan({ platform, sandbox, title, body, tags: [] });
+    console.log(`[sandbox] ${plan.platform} willPost=${plan.willPost}`);
+    console.log(`checks=${plan.checks.join(',')}`);
+    console.log(`command=${plan.command}`);
+    return;
+  }
+
+  if (cmd === 'prepublish-gate') {
+    console.log('npm test');
+    console.log('npm run coverage');
+    console.log('npm run build');
+    console.log('npm run verify:readme');
+    console.log('npm pack -w @ima/cli --dry-run');
     return;
   }
 

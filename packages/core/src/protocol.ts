@@ -24,6 +24,8 @@ export interface AgentContext {
    * crash. If omitted, PublishAgent behaves as before (no persistence).
    */
   queueSink?: (item: import('./publish-queue.js').QueueItem) => Promise<void>;
+  /** Optional per-platform limiter. Keys are `publish:<platform>`. */
+  rateLimiter?: import('./rate-limit.js').RateLimiter;
   now(): string;
 }
 

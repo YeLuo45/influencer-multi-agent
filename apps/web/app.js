@@ -5,6 +5,14 @@ const els = {
   queueSummary: document.getElementById('queue-summary'),
   queueList: document.getElementById('queue-list'),
   feedbackSummary: document.getElementById('feedback-summary'),
+  statsOutput: document.getElementById('stats-output'),
+  metricsOutput: document.getElementById('metrics-output'),
+  roadmapOutput: document.getElementById('roadmap-output'),
+  bulkStatus: document.getElementById('bulk-status'),
+  bulkPause: document.getElementById('bulk-pause'),
+  bulkResume: document.getElementById('bulk-resume'),
+  bulkRetry: document.getElementById('bulk-retry'),
+  bulkCancel: document.getElementById('bulk-cancel'),
   abContentId: document.getElementById('ab-content-id'),
   abLoad: document.getElementById('ab-load'),
   abOutput: document.getElementById('ab-output'),
@@ -15,6 +23,7 @@ const els = {
   queueWork: document.getElementById('queue-work'),
   queueWorkStatus: document.getElementById('queue-work-status'),
   refreshAll: document.getElementById('refresh-all'),
+  realtimeStatus: document.getElementById('realtime-status'),
   llmBadge: document.getElementById('llm-badge'),
   llmProbe: document.getElementById('llm-probe'),
 };
@@ -24,6 +33,9 @@ const views = {
   contents: document.getElementById('view-contents'),
   run: document.getElementById('view-run'),
   queue: document.getElementById('view-queue'),
+  stats: document.getElementById('view-stats'),
+  metrics: document.getElementById('view-metrics'),
+  roadmap: document.getElementById('view-roadmap'),
   feedback: document.getElementById('view-feedback'),
   ab: document.getElementById('view-ab'),
 };
@@ -173,6 +185,40 @@ async function loadFeedback() {
     `window=${windowDays}d total=${totalRecords} recent(within window)=${recentCount} lastUpdated=${lastUpdated ?? '-'}`;
 }
 
+async function loadStats() {
+  const data = await fetchJson('/api/stats');
+  els.statsOutput.textContent = JSON.stringify(data, null, 2);
+}
+
+async function loadMetrics() {
+  const data = await fetchJson('/api/metrics');
+  els.metricsOutput.textContent = JSON.stringify(data, null, 2);
+}
+
+async function loadRoadmap() {
+  const data = await fetchJson('/api/roadmap');
+  els.roadmapOutput.textContent = JSON.stringify(data, null, 2);
+}
+
+const bulkEndpoints = {
+  pause: '/api/bulk/pause',
+  resume: '/api/bulk/resume',
+  retry: '/api/bulk/retry',
+  cancel: '/api/bulk/cancel',
+};
+
+async function runBulk(action, body) {
+  els.bulkStatus.textContent = `running ${action}…`;
+  try {
+    const r = await postJson(bulkEndpoints[action], body ?? {});
+    els.bulkStatus.textContent = `[ok] ${action} changed=${r.changed}`;
+    await loadContents();
+    await loadQueue();
+  } catch (e) {
+    els.bulkStatus.textContent = `[error] ${e.message}`;
+  }
+}
+
 async function loadAbReport(id) {
   if (!id) {
     els.abOutput.textContent = '请输入 content id';
@@ -187,6 +233,10 @@ async function loadAbReport(id) {
 }
 
 els.abLoad.addEventListener('click', () => loadAbReport(els.abContentId.value.trim()));
+els.bulkPause.addEventListener('click', () => runBulk('pause', { stage: 'review' }));
+els.bulkResume.addEventListener('click', () => runBulk('resume', {}));
+els.bulkRetry.addEventListener('click', () => runBulk('retry', {}));
+els.bulkCancel.addEventListener('click', () => runBulk('cancel', {}));
 
 els.runSubmit.addEventListener('click', async () => {
   const topic = els.runTopic.value.trim();
@@ -216,6 +266,37 @@ els.queueWork.addEventListener('click', async () => {
   }
 });
 
+async function refreshRealtimePanels() {
+  await Promise.all([loadContents(), loadQueue(), loadStats(), loadMetrics(), loadRoadmap()]);
+}
+
+function connectRealtimeEvents() {
+  if (typeof EventSource === 'undefined' || !els.realtimeStatus) {
+    if (els.realtimeStatus) els.realtimeStatus.textContent = '实时: unsupported';
+    return;
+  }
+  const source = new EventSource('/api/events');
+  source.addEventListener('open', () => {
+    els.realtimeStatus.textContent = '实时: connected';
+    els.realtimeStatus.className = 'badge realtime-badge live';
+  });
+  source.addEventListener('snapshot', async (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      els.realtimeStatus.textContent = `实时: ${data.contents} contents / ${data.queue.total} queue`;
+      els.realtimeStatus.className = 'badge realtime-badge live';
+      await refreshRealtimePanels();
+    } catch (e) {
+      els.realtimeStatus.textContent = '实时: parse error';
+      els.realtimeStatus.className = 'badge realtime-badge fail';
+    }
+  });
+  source.addEventListener('error', () => {
+    els.realtimeStatus.textContent = '实时: reconnecting…';
+    els.realtimeStatus.className = 'badge realtime-badge fail';
+  });
+}
+
 els.refreshAll.addEventListener('click', () => main());
 els.llmProbe.addEventListener('click', () => probeLlm());
 
@@ -225,9 +306,13 @@ async function main() {
     await loadContents();
     await loadQueue();
     await loadFeedback();
+    await loadStats();
+    await loadMetrics();
+    await loadRoadmap();
   } catch (e) {
     console.error(e);
   }
 }
 
 main();
+connectRealtimeEvents();

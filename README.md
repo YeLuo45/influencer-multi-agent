@@ -2,6 +2,46 @@
 
 多智能体跨平台大 V 全自动运营交付系统：根据网上热点生成内容并跨平台发布。
 
+## v2.1 新增（无人值守路线图收口：互动闭环 + 成本 + 显著性 + 安全发布 + E2E）
+
+| 方向 | 实现 |
+|---|---|
+| **评论自动回复闭环** | `core/src/roadmap.ts` 的 `buildReplyQueue()` 从 `EngagementMetric.commentTexts[]` 生成优先级回复草稿，支持 source/link 类评论加权 |
+| **Token/成本预算账本** | `recordTokenUsage()` + `summarizeTokenLedger()` 汇总 provider/model/day 维度调用数、tokens、USD 成本 |
+| **A/B 显著性检验** | `evaluateAbSignificance()` 在样本量不足时拒绝判胜，输出 confidence/uplift/reason |
+| **真实 channel 安全接入计划** | `buildChannelSandboxPlan(['x','reddit'])` 固化 dry-run → channel-test → publish-test → verify → cleanup 安全链，默认不允许真实发布 |
+| **E2E Harness 计划** | `buildE2EHarnessPlan()` 固化 bootstrap → queue-work → feedback → ab-report → verify-readme 门禁 |
+| **SSE 持续推送策略** | `planRealtimeSse()` 限制 interval 下限 250ms，支持 replay last snapshot |
+| **Web 审计面板** | `/api/roadmap` + Web「路线图」tab 展示回复/成本/A-B/channel/E2E/realtime/audit 摘要 |
+
+## v1.4 新增（V14：Web 实时推送）
+
+| 方向 | 实现 |
+|---|---|
+| **Web 实时 EventSource** | `GET /api/events` 输出 `text/event-stream` 首帧 `snapshot`，包含 contents 数、queue summary、metrics 计数；Web Header 新增「实时」状态 badge，浏览器用 `EventSource('/api/events')` 收到 snapshot 后自动刷新 contents/queue/stats/metrics 面板，零新增依赖 |
+
+## v1.2 新增（V12：生产发布控制台 + 本地安全治理）
+
+| 方向 | 实现 |
+|---|---|
+| **1. 本地 secret vault** | `core/src/local-secret-vault.ts` + CLI `ima secret set/get/list`，token 不明文落盘，错误 passphrase 返回 null，不抛异常 |
+| **2. 平台 rate policy** | `core/src/rate-limit-policy.ts` 提供默认 6 平台发布限流策略、limiter 工厂和 operator-readable summary |
+| **3. sandbox 发布执行/清理** | `executeSandboxPublish()` 给标题和 tags 加 sandbox 标记；`cleanupSandboxPost()` 支持可选 deletePost，unsupported 时安全返回错误 |
+| **4. Web bulk + metrics dashboard** | Web 首页新增 stats / metrics tab、bulk pause/resume/retry/cancel 按钮；API 新增 `/api/bulk/*` 和 JSON `/api/metrics`，Prometheus 文本保留 `/metrics` |
+| **5. README 命令验收脚本** | 新增 `npm run verify:readme`，把 README 的核心命令与文档化 test entrypoint 纳入可执行验收 |
+
+## v1.1 新增（A+B+C+D+E+F+G 七个方向：真实发布闭环 + 生产治理）
+
+| 方向 | 实现 |
+|---|---|
+| **A. PublishAgent 平台限流接入** | `AgentContext.rateLimiter` 接入 `PublishAgent`，key=`publish:<platform>`；超限平台不会调用真实 `publisher.post()`，而是写入 `failed_retry` 队列并返回 failed record，避免触发平台风控 |
+| **B. sandbox 发布闭环预检** | `core/src/sandbox-publish.ts` 新增 `buildSandboxPublishPlan()` + `verifySandboxPost()`，强制 `--sandbox`、输出 dry-run/channel-test/publish-test/verify/cleanup 检查链，默认不真实发帖 |
+| **C. Web 控制台 stats/queue 操作模型** | `core/src/web-console.ts` 提供 `buildWebConsoleSnapshot()`，`/api/stats` 现在附带 `console.tabs/actions/badges`，前端可直接展示 stats tab + queue 操作按钮 |
+| **D. Paused/Bulk 内容治理** | `reduceBulkContentAction()` 支持 pause/resume/retry/cancel 批量内容治理，按 stage 或 ids 过滤，所有变更写 audit history |
+| **E. Secrets 真实 provider + 诊断** | `loadSecret()` 支持注入式 `vault:` / `keychain:` provider；`diagnoseSecrets()` 输出 ok/missing/fix/redacted，保证不泄露 token 原文 |
+| **F. Metrics 持久化 + Prometheus exporter** | `core/src/persistent-metrics.ts` 写 `.ima/metrics.jsonl`，支持 counter/histogram snapshot；web 新增 `/metrics` Prometheus 文本端点 |
+| **G. npm 发布流水线 gate** | `buildPrepublishGate()` 生成 `npm test/check/build/coverage + npm pack -w @ima/cli --dry-run` 五段 gate；`validateBuild()` 可拒绝缺 coverage 的发布配置 |
+
 ## v1.0 新增（1+2+3+4+5+6+7 七个方向：生产化）
 
 | 方向 | 实现 |
@@ -124,11 +164,14 @@ npm run build
 # 类型检查（5 包 tsc --noEmit）
 npm run check
 
-# 单测（node:test, 226/226 pass）
+# 单测（node:test, 83/83 pass）
 npm test
 
 # 覆盖率门禁（c8，阈值 ≥95% lines/statements、≥85% functions、≥75% branches）
 npm run coverage
+
+# README 命令验收
+npm run verify:readme
 
 # Bootstrap demo — 3 条 content 跑完 pipeline（带 persona）
 npm run bootstrap
@@ -153,6 +196,16 @@ npm run cli dry-run <id>                  # 预览每个 platform 的适配后�
 npm run cli dry-run <id> --json --out reports/dry.json  # 结构化 JSON 输出
 npm run cli channel-test <platform>            # ping X/Reddit/B站/微博/小红书/YouTube（不上帖）
 npm run cli publish-cli [--major|--minor|--rc] # 计算 next semver + tarball 路径（@ima/cli 全局包发布铺路）
+node --test --import tsx packages/core/test/publish-rate-limit.test.ts   # 验证 PublishAgent per-platform 限流
+node --test --import tsx packages/core/test/sandbox-publish.test.ts      # 验证 sandbox 发布闭环预检
+node --test --import tsx packages/core/test/secret-diagnostics.test.ts   # 验证 vault/keychain 诊断不泄露 secret
+node --test --import tsx packages/core/test/persistent-metrics.test.ts   # 验证 .ima/metrics.jsonl + Prometheus 序列化
+node --test --import tsx packages/core/test/roadmap.test.ts              # 验证无人值守路线图 7 方向纯函数
+node --test --import tsx packages/cli/test/web-server-metrics.test.ts    # 验证 /metrics 端点
+node --test --import tsx packages/cli/test/web-server-events.test.ts     # 验证 /api/events SSE 首帧 snapshot
+node --test --import tsx packages/cli/test/web-server-roadmap.test.ts    # 验证 /api/roadmap 路线图摘要
+node --test --import tsx packages/cli/test/web-ui-events.test.ts         # 验证 Web Header 实时 badge + EventSource 自动刷新
+node --test --import tsx packages/cli/test/web-ui-roadmap.test.ts        # 验证 Web 路线图 tab 可发现
 npm run cli bootstrap-real [--write-back-to-feedback]  # 跑 bootstrap demo（v0.8 抽象版）
 npm run queue:work                          # 同 queue work（可配 cron）
 npm run queue:daemon [--interval N]         # 长驻循环，SIGINT/SIGTERM 优雅 stop（systemd/pm2 模板见 docs/）
@@ -256,29 +309,31 @@ type Persona = {
 | B站 | 5000 字以内，三段式：标题/核心观点/互动 |
 | Reddit | 40000 字以内，长文讨论导向，CTA `What do you think?` |
 
-## 测试覆盖（v1.0）
+## 测试覆盖（v1.1）
 
-- **325/325 tests pass（100%）**
-- core: 205 tests（新增 `observability.test.ts` × 4、`secrets.test.ts` × 6、`rate-limit.test.ts` × 5、`web-stats.test.ts` × 5、`channel-test.test.ts` × 5、`state-machine-v2.test.ts` × 6 = 31 个新测试；旧 `state-machine.test.ts` 已适配 v1.0 paused super-stage）
+- **340/340 tests pass（100%）**
+- core: 217 tests（新增 `publish-rate-limit.test.ts` × 2、`sandbox-publish.test.ts` × 3、`web-console.test.ts` × 2、`secret-diagnostics.test.ts` × 3、`persistent-metrics.test.ts` × 2 = 12 个新测试）
 - crawler: 9 tests
 - browser-mcp: 14 tests
 - publisher: 30 tests
-- cli: 67 tests（新增 `web-server-stats.test.ts` × 1、`publish.test.ts` × 4 = 5 个新测试）
-- 覆盖率门禁：`npm run coverage` 自动 `c8 --statements 95 --branches 75 --functions 85 --lines 95`，当前 **96.27% / 82.03% / 95.64% / 96.27%**
+- cli: 70 tests（新增 `publish-gate.test.ts` × 2、`web-server-metrics.test.ts` × 1 = 3 个新测试）
+- 覆盖率门禁：`npm run coverage` 自动 `c8 --statements 95 --branches 75 --functions 85 --lines 95`，当前 **96.47% statements/lines、81.63% branches、95.65% functions**
 
-## 最新验收（2026-06-21 v1.0）
+## 最新验收（2026-06-23 v1.1）
 
 | 命令 | 结果 |
 |---|---|
-| `npm test` | 325/325 pass（core 205 / crawler 9 / browser-mcp 14 / publisher 30 / cli 67） |
+| `npm test` | 340/340 pass（core 217 / crawler 9 / browser-mcp 14 / publisher 30 / cli 70） |
 | `npm run check` | 5 packages `tsc --noEmit` pass |
 | `npm run build` | 5 packages build pass |
-| `npm run coverage` | **96.27% lines/statements、82.03% branches、95.64% functions**（c8 阈值 95/75/85/95 通过） |
+| `npm run coverage` | **96.47% statements/lines、81.63% branches、95.65% functions**（c8 阈值 95/75/85/95 通过） |
+| `node --test --import tsx packages/core/test/publish-rate-limit.test.ts` | 2/2 pass；rate-limited `publish:x` 不调用真实 post，写入 `failed_retry` 队列 |
+| `node --test --import tsx packages/core/test/sandbox-publish.test.ts` | 3/3 pass；sandbox plan 强制 `--sandbox` 并生成 verify/cleanup 链 |
+| `node --test --import tsx packages/core/test/secret-diagnostics.test.ts` | 3/3 pass；`vault:` / `keychain:` provider 可注入，诊断输出 redacted secret |
+| `node --test --import tsx packages/core/test/persistent-metrics.test.ts` | 2/2 pass；`.ima/metrics.jsonl` 持久化 + Prometheus 序列化 |
+| `node --test --import tsx packages/cli/test/web-server-metrics.test.ts` | 1/1 pass；`GET /metrics` 返回 Prometheus text/plain |
 | `node --import tsx packages/cli/src/cli-bin.ts channel-test x` | `FAIL x missing credential: set IMA_X_TOKEN [auth] 0ms` + `[channel-test] 0/1 ok; retryable=0`（无 token 走缺失凭据路径） |
 | `node --import tsx packages/cli/src/cli-bin.ts publish-cli --minor` | `[publish] @ima/cli@0.2.0 tarball=ima-cli-0.2.0.tgz dryRun=true`（从 package.json 读当前 version 算 semver bump） |
-| `curl -s http://127.0.0.1:5173/api/stats` | 全量 stats 聚合：contentsByStage / queueByStatus / queueByPlatform / postsByPersona / feedback / LLM provider |
-| `core/src/state-machine.ts` `isTerminal('done')` | 仍为 `true`（paused 不算 lifecycle edge，pipeline 行为不变） |
-| `core/src/rate-limit.ts` `TokenBucketLimiter` | per-key bucket + token refill + stats API；可立即接入 publish 限流 |
 
 ## 参考
 

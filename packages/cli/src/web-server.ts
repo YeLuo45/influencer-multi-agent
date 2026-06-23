@@ -15,9 +15,9 @@
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'http';
 import { existsSync, readFileSync, readdirSync } from 'fs';
-import { join, resolve } from 'path';
+import { join, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { JsonStore, buildAbReport, selectLlm, type LlmSelection } from '@ima/core';
+import { JsonStore, buildAbReport, selectLlm, type Content, type ContentStage, type LlmSelection } from '@ima/core';
 
 // Resolve apps/web/ relative to this file. web-server.ts lives at
 // packages/cli/src/web-server.ts → up two levels to packages/cli/, then up
@@ -93,6 +93,11 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: HandleCtx)
   if (path === '/api/llm') return await apiLlm(res, ctx);
   if (path === '/api/llm/probe' && req.method === 'POST') return await apiLlmProbe(res, ctx);
   if (path === '/api/stats') return await apiStats(res, ctx);
+  if (path === '/api/metrics') return await apiMetricsDashboard(res, ctx);
+  if (path === '/api/roadmap') return await apiRoadmap(res, ctx);
+  if (path === '/api/events') return await apiEvents(res, ctx);
+  if (path === '/metrics') return await apiMetrics(res, ctx);
+  if (path.startsWith('/api/bulk/') && req.method === 'POST') return await apiBulk(req, res, ctx, path.slice('/api/bulk/'.length));
   if (path === '/api/run' && req.method === 'POST') return await apiRun(req, res, ctx);
   if (path === '/api/queue/work' && req.method === 'POST') return await apiQueueWork(res, ctx);
   return await serveStatic(path, res);
@@ -135,7 +140,7 @@ async function apiLlmProbe(res: ServerResponse, ctx: HandleCtx): Promise<void> {
 }
 
 async function apiStats(res: ServerResponse, ctx: HandleCtx): Promise<void> {
-  const { computeWebStats } = await import('@ima/core');
+  const { computeWebStats, buildWebConsoleSnapshot } = await import('@ima/core');
   // Reuse apiContents + apiQueue + apiFeedback data to build the stats
   // payload in a single round-trip. Walking the same files the per-endpoint
   // routes walk keeps the totals consistent.
@@ -173,7 +178,71 @@ async function apiStats(res: ServerResponse, ctx: HandleCtx): Promise<void> {
     ab: { winner: null, variants: 0, minSampleSize: 1 },
     llm: { provider: ctx.llm.provider, model: ctx.llm.model },
   });
-  sendJson(res, stats);
+  sendJson(res, { ...stats, console: buildWebConsoleSnapshot({ stats, queue: queueItems.map((item, idx) => ({ id: `q-${idx}`, status: item.status, platform: item.platform })) }) });
+}
+
+async function apiMetricsDashboard(res: ServerResponse, ctx: HandleCtx): Promise<void> {
+  const { createPersistentMetrics } = await import('@ima/core');
+  const metrics = createPersistentMetrics({ rootDir: dirname(ctx.store.root) });
+  sendJson(res, metrics.snapshot());
+}
+
+async function apiMetrics(res: ServerResponse, ctx: HandleCtx): Promise<void> {
+  const { createPersistentMetrics, renderPrometheusMetrics } = await import('@ima/core');
+  const metrics = createPersistentMetrics({ rootDir: dirname(ctx.store.root) });
+  send(res, 200, 'text/plain; version=0.0.4', renderPrometheusMetrics(metrics.snapshot()));
+}
+
+async function apiRoadmap(res: ServerResponse, _ctx: HandleCtx): Promise<void> {
+  sendJson(res, {
+    replies: [],
+    cost: { totalCalls: 0, totalTokens: 0, totalCostUsd: 0, byModel: {}, byDay: {} },
+    ab: { winner: null, confidence: 0, uplift: 0, reason: 'no_variants' },
+    channelPlan: {
+      platforms: ['x', 'reddit'],
+      readyForRealPublish: false,
+      steps: ['dry-run', 'channel-test', 'publish-test', 'verify', 'cleanup'].map((kind) => ({ kind, platform: 'all', sandbox: true })),
+    },
+    e2e: { gates: ['bootstrap', 'queue-work', 'feedback', 'ab-report', 'verify-readme'], commands: ['npm run bootstrap', 'npm run queue:work', 'npm run cli feedback', 'npm run verify:readme'] },
+    realtime: { mode: 'continuous', intervalMs: 1000, replayLast: true },
+    audit: { total: 0, failures: 0, latestAt: null, byActor: {}, byKind: {} },
+  });
+}
+
+async function buildRealtimeSnapshot(ctx: HandleCtx): Promise<{
+  at: string;
+  contents: number;
+  queue: { total: number; byStatus: Record<string, number> };
+  metrics: { counters: number; histograms: number };
+}> {
+  const contentFiles = await ctx.store.list('content');
+  const contents = contentFiles.filter((file) => file.endsWith('.json')).length;
+  const queueDir = ctx.store.path('queue');
+  const byStatus: Record<string, number> = { pending: 0, posting: 0, posted: 0, failed_retry: 0, failed_dead: 0 };
+  let queueTotal = 0;
+  if (existsSync(queueDir)) {
+    for (const file of readdirSync(queueDir).filter((x) => x.endsWith('.json'))) {
+      const raw = readFileSync(join(queueDir, file), 'utf-8');
+      if (!raw.trim()) continue;
+      const item = JSON.parse(raw) as { status?: string };
+      const status = item.status ?? 'unknown';
+      byStatus[status] = (byStatus[status] ?? 0) + 1;
+      queueTotal += 1;
+    }
+  }
+  const { createPersistentMetrics } = await import('@ima/core');
+  const snapshot = createPersistentMetrics({ rootDir: dirname(ctx.store.root) }).snapshot();
+  return {
+    at: ctx.now(),
+    contents,
+    queue: { total: queueTotal, byStatus },
+    metrics: { counters: Object.keys(snapshot.counters).length, histograms: Object.keys(snapshot.histograms).length },
+  };
+}
+
+async function apiEvents(res: ServerResponse, ctx: HandleCtx): Promise<void> {
+  const snapshot = await buildRealtimeSnapshot(ctx);
+  send(res, 200, 'text/event-stream', `event: snapshot\ndata: ${JSON.stringify(snapshot)}\n\n`);
 }
 
 async function apiRun(req: IncomingMessage, res: ServerResponse, ctx: HandleCtx): Promise<void> {
@@ -195,6 +264,36 @@ async function apiRun(req: IncomingMessage, res: ServerResponse, ctx: HandleCtx)
 async function apiQueueWork(res: ServerResponse, ctx: HandleCtx): Promise<void> {
   const items = await ctx.store.list('queue');
   sendJson(res, { scanned: items.length });
+}
+
+async function apiBulk(req: IncomingMessage, res: ServerResponse, ctx: HandleCtx, action: string): Promise<void> {
+  if (!['pause', 'resume', 'retry', 'cancel'].includes(action)) return sendJsonError(res, 404, `unknown bulk action: ${action}`);
+  const body = await readJsonBody<{ ids?: string[]; stage?: ContentStage }>(req);
+  const files = await ctx.store.list('content');
+  const ids = body?.ids?.length ? body.ids : files.filter((file) => file.endsWith('.json')).map((file) => file.replace(/\.json$/, ''));
+  const changed: string[] = [];
+  for (const id of ids) {
+    const content = await ctx.store.read<Content>(`content/${id}.json`);
+    if (!content) continue;
+    if (body?.stage && content.stage !== body.stage) continue;
+    const nextStage = bulkNextStage(action, content.stage);
+    if (!nextStage || nextStage === content.stage) continue;
+    const previous = content.stage;
+    content.stage = nextStage;
+    content.updatedAt = ctx.now();
+    content.history.unshift({ from: previous, to: nextStage, agent: 'web-bulk', at: ctx.now(), note: `bulk ${action}` });
+    await ctx.store.write(`content/${id}.json`, content);
+    changed.push(id);
+  }
+  sendJson(res, { action, changed: changed.length, ids: changed });
+}
+
+function bulkNextStage(action: string, stage: ContentStage): ContentStage | null {
+  if (action === 'pause') return 'needs_revision';
+  if (action === 'resume') return stage === 'needs_revision' ? 'review' : stage;
+  if (action === 'retry') return stage === 'needs_revision' ? 'draft' : stage;
+  if (action === 'cancel') return 'needs_revision';
+  return null;
 }
 
 async function apiContents(res: ServerResponse, ctx: HandleCtx): Promise<void> {

@@ -38,6 +38,9 @@ export class PublishAgent implements Agent<void, PostRecord[]> {
           }
         };
         try {
+          if (ctx.rateLimiter && !ctx.rateLimiter.tryAcquire(`publish:${p}`)) {
+            throw new Error(`rate limit exceeded for ${p}`);
+          }
           const rec = await ctx.publisher.post(p, { title: draft.title, body, tags: draft.tags });
           records.push({ ...rec, postedAt: rec.postedAt ?? now, ...(variantTag ? { variantTag } : {}) });
           await safeSink({ ...item, status: 'posted', postId: rec.postId, url: rec.url ?? null, postedAt: rec.postedAt ?? now });

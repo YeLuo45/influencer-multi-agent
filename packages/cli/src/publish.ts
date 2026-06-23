@@ -12,17 +12,24 @@ export interface PublishConfig {
 }
 
 export interface PublishInput {
-  name: string;
-  version: string;
+  name?: string;
+  version?: string;
+  packageName?: string;
+  currentVersion?: string;
+  bump?: BumpKind;
   dryRun?: boolean;
+  checks?: string[];
 }
 
-export function buildPublish(input: PublishInput): PublishConfig {
+export function buildPublish(input: PublishInput): PublishConfig & { checks?: string[] } {
+  const name = input.name ?? input.packageName ?? '';
+  const version = input.version ?? (input.currentVersion && input.bump ? suggestVersion(input.currentVersion, input.bump) : '');
   return {
-    name: input.name,
-    version: input.version,
-    tarball: `${input.name.replace(/^@/, '').replace(/\//g, '-')}-${input.version}.tgz`,
+    name,
+    version,
+    tarball: `${name.replace(/^@/, '').replace(/\//g, '-')}-${version}.tgz`,
     dryRun: input.dryRun ?? false,
+    ...(input.checks ? { checks: [...input.checks] } : {}),
   };
 }
 
@@ -47,19 +54,47 @@ export function suggestVersion(current: string, kind: BumpKind): string {
 }
 
 export interface BuildValidationInput {
-  name: string;
-  version: string;
+  name?: string;
+  version?: string;
+  checks?: string[];
 }
 
 export type BuildValidationResult =
-  | { ok: true }
-  | { ok: false; reason: string };
+  | { ok: true; errors?: never }
+  | { ok: false; reason: string; errors: string[] };
 
 const NAME_RE = /^@?[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*)?$/;
 const VERSION_RE = /^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/;
+const REQUIRED_GATE_COMMANDS = ['npm test', 'npm run check', 'npm run build', 'npm run coverage'] as const;
 
 export function validateBuild(input: BuildValidationInput): BuildValidationResult {
-  if (!input.name || !NAME_RE.test(input.name)) return { ok: false, reason: `invalid package name: ${input.name}` };
-  if (!input.version || !VERSION_RE.test(input.version)) return { ok: false, reason: `invalid semver: ${input.version}` };
-  return { ok: true };
+  const errors: string[] = [];
+  if (!input.name || !NAME_RE.test(input.name)) errors.push(`invalid package name: ${input.name}`);
+  if (!input.version || !VERSION_RE.test(input.version)) errors.push(`invalid semver: ${input.version}`);
+  if (input.checks) {
+    for (const command of REQUIRED_GATE_COMMANDS) {
+      if (!input.checks.includes(command)) errors.push(`missing gate: ${command}`);
+    }
+  }
+  return errors.length === 0 ? { ok: true } : { ok: false, reason: errors[0] ?? 'invalid build', errors };
+}
+
+export interface PrepublishGate {
+  packageName: string;
+  version: string;
+  commands: string[];
+  ready: boolean;
+  summary: string;
+}
+
+export function buildPrepublishGate(input: { packageName: string; version: string }): PrepublishGate {
+  const commands = [...REQUIRED_GATE_COMMANDS, `npm pack -w ${input.packageName} --dry-run`];
+  const validation = validateBuild({ name: input.packageName, version: input.version, checks: commands });
+  return {
+    packageName: input.packageName,
+    version: input.version,
+    commands,
+    ready: validation.ok,
+    summary: `${input.packageName}@${input.version} prepublish gate: ${validation.ok ? 'ready' : 'blocked'}`,
+  };
 }

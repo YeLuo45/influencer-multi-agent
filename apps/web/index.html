@@ -12,6 +12,7 @@
       <h1>IMA 控制台</h1>
       <div class="hdr-status">
         <span id="llm-badge" class="badge llm-badge">LLM: …</span>
+        <span id="realtime-status" class="badge realtime-badge">实时: connecting…</span>
         <button id="llm-probe" class="btn-secondary" title="Ping the configured LLM endpoint">探测</button>
         <button id="refresh-all" class="btn-secondary" title="Refresh all panels">刷新</button>
       </div>
@@ -19,6 +20,9 @@
         <button data-tab="contents" class="tab active">内容</button>
         <button data-tab="run" class="tab">新建</button>
         <button data-tab="queue" class="tab">发布队列</button>
+        <button data-tab="stats" class="tab">统计</button>
+        <button data-tab="metrics" class="tab">Metrics</button>
+        <button data-tab="roadmap" class="tab">路线图</button>
         <button data-tab="feedback" class="tab">反馈</button>
         <button data-tab="ab" class="tab">A/B 报告</button>
       </nav>
@@ -48,8 +52,27 @@
     </section>
     <section id="view-queue" class="view">
       <h2>发布队列</h2>
+      <div class="queue-actions">
+        <button id="bulk-pause" class="btn-secondary">Bulk pause review</button>
+        <button id="bulk-resume" class="btn-secondary">Bulk resume</button>
+        <button id="bulk-retry" class="btn-secondary">Bulk retry</button>
+        <button id="bulk-cancel" class="btn-secondary">Bulk cancel</button>
+        <span id="bulk-status" class="hint"></span>
+      </div>
       <div id="queue-summary" class="summary"></div>
       <div id="queue-list" class="card-list"></div>
+    </section>
+    <section id="view-stats" class="view">
+      <h2>运营统计</h2>
+      <pre id="stats-output" class="pre"></pre>
+    </section>
+    <section id="view-metrics" class="view">
+      <h2>Metrics Dashboard</h2>
+      <pre id="metrics-output" class="pre"></pre>
+    </section>
+    <section id="view-roadmap" class="view">
+      <h2>无人值守路线图</h2>
+      <pre id="roadmap-output" class="pre"></pre>
     </section>
     <section id="view-feedback" class="view">
       <h2>反馈窗口</h2>
