@@ -17,7 +17,7 @@ void test('web-server: /api/roadmap exposes unattended roadmap automation summar
   const { handle, root } = await boot();
   try {
     const response = await fetch(`${handle.url}/api/roadmap`);
-    const json = await response.json() as { replies: unknown[]; cost: { totalCalls: number }; ab: { reason: string }; channelPlan: { steps: unknown[] }; e2e: { gates: string[] }; realtime: { mode: string }; audit: { total: number }; production: { auditPath: string; channelAdapter: { steps: string[] }; releaseLocal: string[] } };
+    const json = await response.json() as { replies: unknown[]; cost: { totalCalls: number }; ab: { reason: string }; channelPlan: { steps: unknown[] }; e2e: { gates: string[] }; realtime: { mode: string }; audit: { total: number }; production: { replySafety: { readyForRealReply: boolean }; budget: { provider: string }; channel: { steps: string[] }; release: { ok: boolean } } };
     assert.equal(response.status, 200);
     assert.equal(json.cost.totalCalls, 0);
     assert.equal(json.ab.reason, 'no_variants');
@@ -25,9 +25,10 @@ void test('web-server: /api/roadmap exposes unattended roadmap automation summar
     assert.ok(json.e2e.gates.includes('verify-readme'));
     assert.equal(json.realtime.mode, 'continuous');
     assert.equal(json.audit.total, 0);
-    assert.equal(json.production.auditPath, 'audit.jsonl');
-    assert.ok(json.production.channelAdapter.steps.includes('auth-probe'));
-    assert.ok(json.production.releaseLocal.includes('npm run verify:readme'));
+    assert.equal(json.production.replySafety.readyForRealReply, false);
+    assert.equal(json.production.budget.provider, 'mock');
+    assert.ok(json.production.channel.steps.includes('auth-probe:false'));
+    assert.equal(json.production.release.ok, true);
   } finally {
     await handle.close();
     rmSync(root, { recursive: true, force: true });

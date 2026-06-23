@@ -6,13 +6,13 @@
 
 | 方向 | 实现 |
 |---|---|
-| **真实回复发送器计划** | `buildReplySendPlan()` 固化 sandbox-reply → verify → cleanup，只有非 sandbox 且队列非空才 `readyForRealReply=true` |
-| **成本预算熔断** | `applyBudgetBreaker()` 按 day/month budget 自动降级 provider 到 mock/低价后备 |
-| **A/B 自动决策器** | `buildAbDecisionAction()` 把 significance 结果转换成 collect-more 或 apply-winner 行动 |
-| **Channel adapter v1 安全链** | `buildChannelAdapterV1Plan(['x','reddit'])` 强制 auth-probe → sandbox-post → verify → delete-cleanup |
-| **运营审计持久化计划** | `buildPersistentAuditAppend()` 输出 `.ima/audit.jsonl` 兼容 JSONL 追加行；`/api/roadmap` 暴露 auditPath |
-| **E2E release:local** | 新增 `npm run release:local` 聚合 bootstrap、queue:work、feedback、verify:readme，避免递归 verify |
-| **SSE 真持续推送计划** | `buildSseTickPlan()` 输出 bounded interval、snapshot event 和稳定 change hash |
+| **真实回复发送器计划** | `executeReplyQueue()` + `ima reply send --sandbox` 固化 sandbox-reply → audit.jsonl，真实发送必须显式 `--real` |
+| **成本预算熔断** | `planLlmProviderWithBudget()` 按 day/month budget 自动降级 provider 到 mock/低价后备，并输出审计事件 |
+| **A/B 自动决策器** | `applyAbWinnerDecision()` 把 significance 结果转换成 collect-more 或 apply-winner，并更新 variant 权重 |
+| **Channel adapter v1 安全链** | `ChannelAdapterV1` + `runChannelAdapterSafetyChain()` 强制 auth-probe → sandbox-post → verify → cleanup |
+| **运营审计持久化计划** | `appendAuditJsonl()` 输出 `.ima/audit.jsonl` 兼容 JSONL 追加行；`/api/roadmap` 暴露 production snapshot |
+| **E2E release:local** | `npm run release:local` 聚合 bootstrap、queue:work、feedback、verify:readme、`ima release-local-json`，避免递归 verify |
+| **SSE 真持续推送计划** | `buildSseTickPlan()` 输出 bounded interval、snapshot event 和稳定 change hash；Web 路线图优先展示 production 控制台 |
 
 ## v2.1 新增（无人值守路线图收口：互动闭环 + 成本 + 显著性 + 安全发布 + E2E）
 
@@ -176,7 +176,7 @@ npm run build
 # 类型检查（5 包 tsc --noEmit）
 npm run check
 
-# 单测（node:test, 90/90 pass）
+# 单测（node:test, 97/97 pass）
 npm test
 
 # 覆盖率门禁（c8，阈值 ≥95% lines/statements、≥85% functions、≥75% branches）
@@ -208,6 +208,9 @@ npm run cli dry-run <id>                  # 预览每个 platform 的适配后�
 npm run cli dry-run <id> --json --out reports/dry.json  # 结构化 JSON 输出
 npm run cli channel-test <platform>            # ping X/Reddit/B站/微博/小红书/YouTube（不上帖）
 npm run cli publish-cli [--major|--minor|--rc] # 计算 next semver + tarball 路径（@ima/cli 全局包发布铺路）
+npm run cli reply send --sandbox          # 沙盒回复执行器；追加 .ima/audit.jsonl，不触达真实平台
+npm run cli production                     # 输出生产控制台 JSON snapshot
+npm run cli release-local-json             # 输出 release:local 机器可读 JSON 报告
 node --test --import tsx packages/core/test/publish-rate-limit.test.ts   # 验证 PublishAgent per-platform 限流
 node --test --import tsx packages/core/test/sandbox-publish.test.ts      # 验证 sandbox 发布闭环预检
 node --test --import tsx packages/core/test/secret-diagnostics.test.ts   # 验证 vault/keychain 诊断不泄露 secret

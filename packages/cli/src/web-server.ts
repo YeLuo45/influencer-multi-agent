@@ -17,7 +17,20 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'http';
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { JsonStore, buildAbReport, selectLlm, type Content, type ContentStage, type LlmSelection } from '@ima/core';
+import {
+  JsonStore,
+  buildAbReport,
+  buildProductionConsoleSnapshot,
+  buildReleaseLocalJsonReport,
+  createStubChannelAdapter,
+  executeReplyQueue,
+  planLlmProviderWithBudget,
+  runChannelAdapterSafetyChain,
+  selectLlm,
+  type Content,
+  type ContentStage,
+  type LlmSelection,
+} from '@ima/core';
 
 // Resolve apps/web/ relative to this file. web-server.ts lives at
 // packages/cli/src/web-server.ts → up two levels to packages/cli/, then up
@@ -206,15 +219,13 @@ async function apiRoadmap(res: ServerResponse, _ctx: HandleCtx): Promise<void> {
     e2e: { gates: ['bootstrap', 'queue-work', 'feedback', 'ab-report', 'verify-readme'], commands: ['npm run bootstrap', 'npm run queue:work', 'npm run cli feedback', 'npm run verify:readme'] },
     realtime: { mode: 'continuous', intervalMs: 1000, replayLast: true },
     audit: { total: 0, failures: 0, latestAt: null, byActor: {}, byKind: {} },
-    production: {
-      replySender: { readyForRealReply: false, steps: ['sandbox-reply', 'verify', 'cleanup'] },
-      budgetBreaker: { action: 'allow', provider: 'configured' },
-      abDecision: { action: 'collect-more' },
-      channelAdapter: { platforms: ['x', 'reddit'], steps: ['auth-probe', 'sandbox-post', 'verify', 'delete-cleanup'] },
-      auditPath: 'audit.jsonl',
-      releaseLocal: ['npm run bootstrap', 'npm run queue:work', 'npm run cli feedback', 'npm run verify:readme'],
-      sseTick: { intervalMs: 1000, replayLast: true },
-    },
+    production: buildProductionConsoleSnapshot({
+      replies: executeReplyQueue([], { sandbox: true, now: _ctx.now(), actor: 'web' }),
+      budget: planLlmProviderWithBudget({ totalCalls: 0, totalTokens: 0, totalCostUsd: 0, byModel: {}, byDay: {} }, { day: _ctx.now().slice(0, 10), dailyBudgetUsd: 1, monthlyBudgetUsd: 10, configuredProvider: _ctx.llm.provider }),
+      ab: { action: 'collect-more', weights: {}, audit: { actor: 'web', kind: 'ab', action: 'collect-more', at: _ctx.now(), ok: true } },
+      channel: runChannelAdapterSafetyChain(createStubChannelAdapter('x'), 'sandbox', _ctx.now()),
+      release: buildReleaseLocalJsonReport([{ name: 'check', ok: true, durationMs: 0, summary: 'web snapshot' }]),
+    }),
   });
 }
 

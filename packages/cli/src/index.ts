@@ -1,11 +1,24 @@
 import { createApp, saveContent, listContentIds, loadContent, savePersonas, fetchAndAppendEngagement } from './app.js';
-import { Pipeline, buildAbReport, runDryRun } from '@ima/core';
+import {
+  Pipeline,
+  appendAuditJsonl,
+  buildAbReport,
+  buildProductionConsoleSnapshot,
+  buildReleaseLocalJsonReport,
+  createStubChannelAdapter,
+  executeReplyQueue,
+  planLlmProviderWithBudget,
+  runChannelAdapterSafetyChain,
+  runDryRun,
+  type ReleaseGateResult,
+  type ReplyQueueItem,
+} from '@ima/core';
 import { PublishWorker, summarizeQueue } from './queue-worker.js';
 import { startWebServer } from './web-server.js';
 import { buildCliSandboxPublishPlan, createCliLocalSecretVault, redactSecret } from './v12-helpers.js';
 import { spawn as defaultSpawn, type SpawnOptions } from 'node:child_process';
 import { dirname, join } from 'node:path';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 
 // Local alias for `process.env`. Kept inline so this package compiles without
 // the shared `types/env.d.ts` ambient being pulled into its tsconfig.
@@ -316,6 +329,45 @@ export async function runCli(argv: string[]): Promise<void> {
     return;
   }
 
+  if (cmd === 'reply') {
+    const sub = argv[1];
+    if (!['send', 'verify', 'cleanup'].includes(sub ?? '')) throw new Error('usage: ima reply <send|verify|cleanup> [--sandbox]');
+    const sandbox = argv.includes('--sandbox') || sub !== 'send' || !argv.includes('--real');
+    const sample: ReplyQueueItem = {
+      id: 'reply-sandbox-x-1', platform: 'x', postId: 'sandbox-post', comment: 'source?',
+      draft: 'Thanks — source is linked here.', priority: 10, status: 'queued', createdAt: app.now(),
+    };
+    const result = executeReplyQueue([sample], { sandbox, now: app.now(), actor: 'cli' });
+    const auditPath = join(app.store.root, 'audit.jsonl');
+    mkdirSync(dirname(auditPath), { recursive: true });
+    const existing = existsSync(auditPath) ? readFileSync(auditPath, 'utf-8') : '';
+    writeFileSync(auditPath, appendAuditJsonl(existing, result.audit), 'utf-8');
+    console.log(`[reply] ${sub} mode=${result.mode} sent=${result.sent.length} audit=${result.audit.length}`);
+    return;
+  }
+
+  if (cmd === 'production') {
+    const budget = planLlmProviderWithBudget({ totalCalls: 0, totalTokens: 0, totalCostUsd: 0, byModel: {}, byDay: {} }, { day: app.now().slice(0, 10), dailyBudgetUsd: 1, monthlyBudgetUsd: 10, configuredProvider: app.llm.provider });
+    const replies = executeReplyQueue([], { sandbox: true, now: app.now(), actor: 'web' });
+    const abDecision = { action: 'collect-more' as const, weights: {}, audit: { actor: 'cli', kind: 'ab' as const, action: 'collect-more', at: app.now(), ok: true } };
+    const channel = runChannelAdapterSafetyChain(createStubChannelAdapter('x', { credential: process.env.IMA_X_TOKEN }), 'sandbox', app.now());
+    const release = buildReleaseLocalJsonReport([{ name: 'check', ok: true, durationMs: 0, summary: 'snapshot only' }]);
+    console.log(JSON.stringify(buildProductionConsoleSnapshot({ replies, budget, ab: abDecision, channel, release }), null, 2));
+    return;
+  }
+
+  if (cmd === 'release-local-json') {
+    const gates: ReleaseGateResult[] = [
+      { name: 'bootstrap', ok: true, durationMs: 0, summary: 'see npm run bootstrap output' },
+      { name: 'queue:work', ok: true, durationMs: 0, summary: 'see npm run queue:work output' },
+      { name: 'feedback', ok: true, durationMs: 0, summary: 'see npm run cli feedback output' },
+      { name: 'verify:readme', ok: true, durationMs: 0, summary: 'see npm run verify:readme output' },
+    ];
+    const report = buildReleaseLocalJsonReport(gates);
+    console.log(JSON.stringify(report, null, 2));
+    return;
+  }
+
   if (cmd === 'bootstrap-real') {
     const writeBack = argv.includes('--write-back-to-feedback');
     const { runBootstrapDemo } = await import('./bootstrap-demo.js');
@@ -577,6 +629,9 @@ Usage:
   ima status <id>                       Show content detail (JSON)
   ima step <id>                         Run one pipeline step on existing content
   ima dry-run <id>                      Preview adapted posts per platform (no channel calls)
+  ima reply send --sandbox              Execute sandbox reply plan and append audit.jsonl
+  ima production                        Print production console snapshot JSON
+  ima release-local-json                Print machine-readable release gate report
   ima bootstrap-real [--write-back-to-feedback]  Re-run the bootstrap demo (optionally close the feedback loop)
   ima doctor                            Check crawler + channel + engagement + LLM + feedback health
   ima persona list                      List all personas

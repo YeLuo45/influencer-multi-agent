@@ -9,12 +9,15 @@ const checks = [
   { name: 'targeted sandbox publish test', cmd: 'node', args: ['--test', '--import', 'tsx', 'packages/core/test/sandbox-publish.test.ts'] },
   { name: 'targeted persistent metrics test', cmd: 'node', args: ['--test', '--import', 'tsx', 'packages/core/test/persistent-metrics.test.ts'] },
   { name: 'targeted unattended roadmap test', cmd: 'node', args: ['--test', '--import', 'tsx', 'packages/core/test/roadmap.test.ts'] },
+  { name: 'targeted production automation test', cmd: 'node', args: ['--test', '--import', 'tsx', 'packages/core/test/production-automation.test.ts'] },
   { name: 'targeted web metrics endpoint test', cmd: 'node', args: ['--test', '--import', 'tsx', 'packages/cli/test/web-server-metrics.test.ts'] },
   { name: 'targeted web events endpoint test', cmd: 'node', args: ['--test', '--import', 'tsx', 'packages/cli/test/web-server-events.test.ts'] },
   { name: 'targeted web roadmap endpoint test', cmd: 'node', args: ['--test', '--import', 'tsx', 'packages/cli/test/web-server-roadmap.test.ts'] },
   { name: 'targeted web realtime ui test', cmd: 'node', args: ['--test', '--import', 'tsx', 'packages/cli/test/web-ui-events.test.ts'] },
   { name: 'targeted web roadmap ui test', cmd: 'node', args: ['--test', '--import', 'tsx', 'packages/cli/test/web-ui-roadmap.test.ts'] },
   { name: 'prepublish gate CLI', cmd: 'npm', args: ['run', 'cli', 'prepublish-gate'] },
+  { name: 'production snapshot CLI', cmd: 'npm', args: ['run', 'cli', 'production'] },
+  { name: 'release local json CLI', cmd: 'npm', args: ['run', 'cli', 'release-local-json'] },
 ];
 
 for (const path of [
@@ -23,6 +26,7 @@ for (const path of [
   'packages/core/test/secret-diagnostics.test.ts',
   'packages/core/test/persistent-metrics.test.ts',
   'packages/core/test/roadmap.test.ts',
+  'packages/core/test/production-automation.test.ts',
   'packages/cli/test/web-server-metrics.test.ts',
   'packages/cli/test/web-server-events.test.ts',
   'packages/cli/test/web-server-roadmap.test.ts',

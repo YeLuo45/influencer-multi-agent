@@ -13,6 +13,8 @@ void test('web ui: exposes unattended roadmap panel in main navigation', () => {
   assert.match(html, /data-tab="roadmap"/);
   assert.match(html, /id="roadmap-output"/);
   assert.match(html, /无人值守路线图/);
+  assert.match(html, /生产控制台/);
   assert.match(js, /fetchJson\('\/api\/roadmap'\)/);
+  assert.match(js, /production/);
   assert.match(js, /loadRoadmap\(\)/);
 });

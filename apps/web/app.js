@@ -197,7 +197,19 @@ async function loadMetrics() {
 
 async function loadRoadmap() {
   const data = await fetchJson('/api/roadmap');
-  els.roadmapOutput.textContent = JSON.stringify(data, null, 2);
+  const production = data.production ?? {};
+  els.roadmapOutput.textContent = JSON.stringify({
+    production,
+    roadmap: {
+      replies: data.replies?.length ?? 0,
+      budget: data.cost,
+      ab: data.ab,
+      channelPlan: data.channelPlan,
+      e2e: data.e2e,
+      realtime: data.realtime,
+      audit: data.audit,
+    },
+  }, null, 2);
 }
 
 const bulkEndpoints = {

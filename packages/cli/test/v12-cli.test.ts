@@ -68,3 +68,36 @@ void test('cli: prepublish-gate prints all release gate commands', () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+void test('cli: reply send --sandbox appends production audit without real platform call', () => {
+  const root = mkdtempSync(join(tmpdir(), 'ima-cli-reply-'));
+  try {
+    const result = runCli(['reply', 'send', '--sandbox'], root);
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /mode=sandbox/);
+    const audit = readFileSync(join(root, '.ima/audit.jsonl'), 'utf-8');
+    assert.match(audit, /"sandbox-reply"/);
+    assert.match(audit, /no external platform call/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+void test('cli: production and release-local-json print machine-readable JSON', () => {
+  const root = mkdtempSync(join(tmpdir(), 'ima-cli-prod-'));
+  try {
+    const production = runCli(['production'], root);
+    assert.equal(production.status, 0);
+    const snapshot = JSON.parse(production.stdout) as { replySafety: { readyForRealReply: boolean }; release: { ok: boolean } };
+    assert.equal(snapshot.replySafety.readyForRealReply, false);
+    assert.equal(snapshot.release.ok, true);
+
+    const release = runCli(['release-local-json'], root);
+    assert.equal(release.status, 0);
+    const report = JSON.parse(release.stdout) as { ok: boolean; gates: unknown[] };
+    assert.equal(report.ok, true);
+    assert.equal(report.gates.length, 4);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
