@@ -206,6 +206,15 @@ async function apiRoadmap(res: ServerResponse, _ctx: HandleCtx): Promise<void> {
     e2e: { gates: ['bootstrap', 'queue-work', 'feedback', 'ab-report', 'verify-readme'], commands: ['npm run bootstrap', 'npm run queue:work', 'npm run cli feedback', 'npm run verify:readme'] },
     realtime: { mode: 'continuous', intervalMs: 1000, replayLast: true },
     audit: { total: 0, failures: 0, latestAt: null, byActor: {}, byKind: {} },
+    production: {
+      replySender: { readyForRealReply: false, steps: ['sandbox-reply', 'verify', 'cleanup'] },
+      budgetBreaker: { action: 'allow', provider: 'configured' },
+      abDecision: { action: 'collect-more' },
+      channelAdapter: { platforms: ['x', 'reddit'], steps: ['auth-probe', 'sandbox-post', 'verify', 'delete-cleanup'] },
+      auditPath: 'audit.jsonl',
+      releaseLocal: ['npm run bootstrap', 'npm run queue:work', 'npm run cli feedback', 'npm run verify:readme'],
+      sseTick: { intervalMs: 1000, replayLast: true },
+    },
   });
 }
 

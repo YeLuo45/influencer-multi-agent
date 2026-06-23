@@ -194,6 +194,90 @@ export function buildOperationAuditPanel(events: OperationAuditEvent[]): {
   return panel;
 }
 
+export interface ReplySendPlan {
+  readyForRealReply: boolean;
+  items: ReplyQueueItem[];
+  steps: Array<{ kind: 'sandbox-reply' | 'verify' | 'cleanup' | 'real-reply'; command: string; sandbox: boolean }>;
+}
+
+export function buildReplySendPlan(items: ReplyQueueItem[], opts: { sandbox?: boolean; now?: string } = {}): ReplySendPlan {
+  const sandbox = opts.sandbox ?? true;
+  return {
+    readyForRealReply: !sandbox && items.length > 0,
+    items: items.map((item) => ({ ...item })),
+    steps: sandbox
+      ? [
+          { kind: 'sandbox-reply', command: 'npm run cli reply send --sandbox', sandbox: true },
+          { kind: 'verify', command: 'npm run cli reply verify', sandbox: true },
+          { kind: 'cleanup', command: 'npm run cli reply cleanup --sandbox', sandbox: true },
+        ]
+      : [{ kind: 'real-reply', command: 'npm run cli reply send', sandbox: false }],
+  };
+}
+
+export function applyBudgetBreaker(
+  summary: TokenLedgerSummary,
+  opts: { day: string; dailyBudgetUsd: number; monthlyBudgetUsd: number; fallbackProvider?: string } ,
+): { action: 'allow' | 'degrade'; provider: string; reason: string } {
+  const daily = summary.byDay[opts.day]?.costUsd ?? 0;
+  if (daily >= opts.dailyBudgetUsd) {
+    return { action: 'degrade', provider: opts.fallbackProvider ?? 'mock', reason: `daily budget exceeded: ${daily}/${opts.dailyBudgetUsd}` };
+  }
+  if (summary.totalCostUsd >= opts.monthlyBudgetUsd) {
+    return { action: 'degrade', provider: opts.fallbackProvider ?? 'mock', reason: `monthly budget exceeded: ${summary.totalCostUsd}/${opts.monthlyBudgetUsd}` };
+  }
+  return { action: 'allow', provider: 'configured', reason: 'within budget' };
+}
+
+export function buildAbDecisionAction(result: AbSignificanceResult):
+  | { action: 'collect-more'; note: string }
+  | { action: 'apply-winner'; winner: string; note: string } {
+  if (!result.winner || result.reason !== 'winner') {
+    return { action: 'collect-more', note: 'A/B needs more samples or clearer separation' };
+  }
+  return { action: 'apply-winner', winner: result.winner, note: `Winner ${result.winner} selected with ${Math.round(result.confidence * 100)}% confidence` };
+}
+
+export type ChannelAdapterStepKind = 'auth-probe' | 'sandbox-post' | 'verify' | 'delete-cleanup';
+
+export function buildChannelAdapterV1Plan(platforms: PlatformId[]): {
+  platforms: PlatformId[];
+  ready: boolean;
+  steps: Array<{ platform: PlatformId; kind: ChannelAdapterStepKind; command: string }>;
+} {
+  const steps = platforms.flatMap((platform) => [
+    { platform, kind: 'auth-probe' as const, command: `npm run cli channel-test ${platform}` },
+    { platform, kind: 'sandbox-post' as const, command: `npm run cli publish-cli --sandbox ${platform}` },
+    { platform, kind: 'verify' as const, command: `npm run cli status <content-id>` },
+    { platform, kind: 'delete-cleanup' as const, command: `npm run cli reply cleanup --platform ${platform}` },
+  ]);
+  return { platforms: [...platforms], ready: false, steps };
+}
+
+export function buildPersistentAuditAppend(event: OperationAuditEvent): { path: 'audit.jsonl'; line: string } {
+  return { path: 'audit.jsonl', line: JSON.stringify(event) };
+}
+
+export function buildReleaseLocalPlan(): { scriptName: 'release:local'; commands: string[]; recursiveVerifyReadme: boolean } {
+  return {
+    scriptName: 'release:local',
+    commands: ['npm run bootstrap', 'npm run queue:work', 'npm run cli feedback', 'npm run cli ab report <content-id> --min-samples 1', 'npm run verify:readme'],
+    recursiveVerifyReadme: false,
+  };
+}
+
+export function buildSseTickPlan(input: { intervalMs?: number; snapshot: Record<string, number> }): {
+  intervalMs: number;
+  changeHash: string;
+  events: Array<{ event: 'snapshot'; data: Record<string, number> }>;
+} {
+  const intervalMs = Math.min(60_000, Math.max(250, input.intervalMs ?? 1_000));
+  const ordered = Object.keys(input.snapshot).sort().map((key) => `${key}:${input.snapshot[key]}`).join('|');
+  let hash = 0;
+  for (const ch of ordered) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  return { intervalMs, changeHash: `sse-${hash.toString(16)}`, events: [{ event: 'snapshot', data: { ...input.snapshot } }] };
+}
+
 function roundMoney(value: number): number {
   return Math.round(value * 1_000_000) / 1_000_000;
 }
