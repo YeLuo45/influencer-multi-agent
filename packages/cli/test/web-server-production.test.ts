@@ -38,6 +38,7 @@ void test('web-server: /api/production exposes durable production operations sna
       releaseOpsDashboard: { status: string; primaryActionId: string; push: { needsPush: boolean } };
       compactedHistory: { total: number; kept: unknown[] };
       releaseLocalHardening: { recursiveVerifyReadme: boolean; commands: string[] };
+      executionReadiness: { status: string; connectorMatrix: { total: number; blocked: number }; approvalQueue: { items: unknown[] }; ciIngest: { mutatesRepo: boolean }; credentialRotation: { rotationRequired: boolean }; replaySandbox: { sideEffects: boolean }; analytics: { totalRuns: number } };
       webActions: { primaryActionId: string; actions: Array<{ id: string }> };
     };
     assert.equal(response.status, 200);
@@ -68,6 +69,14 @@ void test('web-server: /api/production exposes durable production operations sna
     assert.equal(json.compactedHistory.total, 1);
     assert.equal(json.releaseLocalHardening.recursiveVerifyReadme, false);
     assert.ok(json.releaseLocalHardening.commands.includes('npm run verify:readme'));
+    assert.equal(json.executionReadiness.status, 'blocked');
+    assert.equal(json.executionReadiness.connectorMatrix.total, 6);
+    assert.equal(json.executionReadiness.connectorMatrix.blocked > 0, true);
+    assert.equal(json.executionReadiness.approvalQueue.items.length, 3);
+    assert.equal(json.executionReadiness.ciIngest.mutatesRepo, false);
+    assert.equal(json.executionReadiness.credentialRotation.rotationRequired, true);
+    assert.equal(json.executionReadiness.replaySandbox.sideEffects, false);
+    assert.equal(json.executionReadiness.analytics.totalRuns, 1);
     assert.match(json.runbook, /Production Runbook/);
     assert.ok(json.recommendations.some((rec) => rec.id === 'history-ledger-compaction'));
     assert.equal(json.webActions.primaryActionId, 'copy-mcp-commands');

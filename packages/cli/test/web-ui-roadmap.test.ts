@@ -30,6 +30,10 @@ void test('web ui: exposes dedicated production operations panel in main navigat
   assert.match(js, /fetchJson\('\/api\/production'\)/);
   assert.match(js, /releaseOpsDashboard/);
   assert.match(js, /safeForwardExecution/);
+  assert.match(js, /executionReadiness/);
+  assert.match(js, /connectorMatrix/);
+  assert.match(js, /approvalQueue/);
+  assert.match(js, /replaySandbox/);
   assert.match(js, /production-action/);
   assert.match(js, /loadProduction\(\)/);
 });

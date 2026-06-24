@@ -218,6 +218,7 @@ async function loadRoadmap() {
 async function loadProduction() {
   const data = await fetchJson('/api/production');
   const dashboard = data.releaseOpsDashboard ?? {};
+  const readiness = data.executionReadiness ?? {};
   const actions = data.webActions?.actions ?? [];
   els.productionActions.innerHTML = `
     <div class="ops-summary">
@@ -225,6 +226,8 @@ async function loadProduction() {
       ${badge(`primary=${data.webActions?.primaryActionId ?? '-'}`, 'pending')}
       ${badge(`history=${data.history?.total ?? 0}`, 'done')}
       ${badge(`push=${dashboard.push?.status ?? '-'}`, dashboard.push?.needsPush ? 'failed_retry' : 'posted')}
+      ${badge(`exec=${readiness.status ?? 'unknown'}`, readiness.status === 'ready' ? 'posted' : 'failed_retry')}
+      ${badge(`connectors=${readiness.connectorMatrix?.ready ?? 0}/${readiness.connectorMatrix?.total ?? 0}`, readiness.connectorMatrix?.blocked ? 'failed_retry' : 'posted')}
     </div>
     <div class="action-grid">
       ${actions.map((action) => `
@@ -237,6 +240,8 @@ async function loadProduction() {
       <strong>Failed queue:</strong> ${(dashboard.failedQueue ?? []).map((item) => escapeHtml(item.gate)).join(', ') || 'none'}
       · <strong>CI:</strong> ${dashboard.ci?.passed ?? 0}/${dashboard.ci?.total ?? 0}
       · <strong>Safe mode:</strong> ${data.safeForwardExecution?.mode ?? data.safeForwardCommand?.mode ?? 'dry-run'}
+      · <strong>Approval:</strong> ${readiness.approvalQueue?.items?.length ?? 0} queued
+      · <strong>Replay:</strong> ${readiness.replaySandbox?.sideEffects === false ? 'dry-run only' : 'unknown'}
     </div>
   `;
   els.productionActions.querySelectorAll('.production-action').forEach((button) => {
@@ -252,6 +257,7 @@ async function loadProduction() {
   });
   els.productionOutput.textContent = JSON.stringify({
     releaseOpsDashboard: data.releaseOpsDashboard,
+    executionReadiness: data.executionReadiness,
     safeForwardExecution: data.safeForwardExecution,
     structuredRunbook: data.structuredRunbook,
     releaseLocalHardening: data.releaseLocalHardening,

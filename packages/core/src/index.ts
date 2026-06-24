@@ -26,5 +26,6 @@ export * from './web-console.js';
 export * from './persistent-metrics.js';
 export * from './roadmap.js';
 export * from './production-automation.js';
+export * from './production-ops.js';
 export * from './delivery-evidence.js';
 export { ResearchAgent, IdeaAgent, DraftAgent, ReviewAgent, ScheduleAgent, PublishAgent, AuditAgent, TranslateAgent, PLATFORM_LOCALE } from './agents/index.js';

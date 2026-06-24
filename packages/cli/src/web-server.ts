@@ -37,6 +37,7 @@ import {
   buildStructuredRunbook,
   compactDeliveryHistoryLedger,
   buildReleaseLocalHardeningPlan,
+  buildProductionExecutionReadiness,
   recommendNextIterations,
   createPlatformAdapters,
   createStubChannelAdapter,
@@ -277,6 +278,26 @@ async function apiProduction(res: ServerResponse, ctx: HandleCtx): Promise<void>
   });
   const compactedHistory = compactDeliveryHistoryLedger([evidence], 20);
   const releaseLocalHardening = buildReleaseLocalHardeningPlan(process.cwd());
+  const executionReadiness = buildProductionExecutionReadiness({
+    connectors: [
+      { platform: 'x', credentialPresent: Boolean(process.env.IMA_X_TOKEN), healthOk: channel.ok, dryRunOk: true, realPostEnabled: false, retryableErrors: ['rate_limit'] },
+      { platform: 'reddit', credentialPresent: Boolean(process.env.IMA_REDDIT_TOKEN), healthOk: false, dryRunOk: true, realPostEnabled: false, retryableErrors: ['timeout'] },
+      { platform: 'youtube', credentialPresent: Boolean(process.env.IMA_YOUTUBE_TOKEN), healthOk: false, dryRunOk: true, realPostEnabled: false, retryableErrors: ['quota'] },
+      { platform: 'bilibili', credentialPresent: Boolean(process.env.IMA_BILIBILI_TOKEN), healthOk: false, dryRunOk: true, realPostEnabled: false, retryableErrors: ['rate_limit'] },
+      { platform: 'weibo', credentialPresent: Boolean(process.env.IMA_WEIBO_TOKEN), healthOk: false, dryRunOk: true, realPostEnabled: false, retryableErrors: ['rate_limit'] },
+      { platform: 'xiaohongshu', credentialPresent: Boolean(process.env.IMA_XHS_TOKEN), healthOk: false, dryRunOk: true, realPostEnabled: false, retryableErrors: ['captcha'] },
+    ],
+    actions: [
+      { id: 'approve-real-post', kind: 'real-post', label: 'Approve real platform post', risk: 'high', command: 'npm run cli publish-cli --real' },
+      { id: 'approve-mcp-forward', kind: 'mcp-forward', label: 'Approve MCP status forward', risk: 'medium', command: safeForwardCommand.commands.join(' && ') },
+      { id: 'copy-runbook', kind: 'runbook-command', label: 'Copy structured runbook', risk: 'low', command: 'copy structuredRunbook.copyMarkdown' },
+    ],
+    runs: [
+      { id: 'local-web-snapshot', ok: evidence.ok, durationMs: 0, failedGates: evidence.failedGates, platformErrors: channel.ok ? {} : { x: 1 }, at: ctx.now() },
+    ],
+    rootDir: '.ima/release-ops',
+    topic: 'production replay sandbox',
+  });
   const snapshot = buildProductionConsoleSnapshot({
     replies: executeReplyQueue([], { sandbox: true, now: ctx.now(), actor: 'web' }),
     budget,
@@ -287,7 +308,7 @@ async function apiProduction(res: ServerResponse, ctx: HandleCtx): Promise<void>
     tokenLedger: { totalCalls: tokenEntries.length, totalCostUsd: tokenEntries.reduce((sum, entry) => sum + entry.costUsd, 0) },
     replyQueue: buildReplyQueueState([]),
   });
-  sendJson(res, { ...snapshot, evidence, safeForward, failureChecklist: checklist, deliveryMarkdown: buildDeliveryMarkdown(evidence, safeForward), history, safeForwardCommand, safeForwardExecution, runbook, structuredRunbook, recommendations, webActions, releaseOpsDashboard, compactedHistory, releaseLocalHardening });
+  sendJson(res, { ...snapshot, evidence, safeForward, failureChecklist: checklist, deliveryMarkdown: buildDeliveryMarkdown(evidence, safeForward), history, safeForwardCommand, safeForwardExecution, runbook, structuredRunbook, recommendations, webActions, releaseOpsDashboard, compactedHistory, releaseLocalHardening, executionReadiness });
 }
 
 async function apiRoadmap(res: ServerResponse, _ctx: HandleCtx): Promise<void> {
