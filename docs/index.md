@@ -10,3 +10,5 @@
 | Technical Solution | `docs/technical-solution.v2.md` | v2 | 2026-06-24 |
 | PRD | `docs/prd.v3.md` | v3 | 2026-06-24 |
 | Technical Solution | `docs/technical-solution.v3.md` | v3 | 2026-06-24 |
+| PRD | `docs/prd.v4.md` | v4 | 2026-06-24 |
+| Technical Solution | `docs/technical-solution.v4.md` | v4 | 2026-06-24 |

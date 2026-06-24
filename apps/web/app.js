@@ -226,6 +226,10 @@ async function loadProduction() {
     safeForward: data.safeForward,
     failureChecklist: data.failureChecklist,
     deliveryMarkdown: data.deliveryMarkdown,
+    history: data.history,
+    safeForwardCommand: data.safeForwardCommand,
+    runbook: data.runbook,
+    recommendations: data.recommendations,
     budget: data.budget,
   }, null, 2);
 }

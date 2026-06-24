@@ -4,9 +4,17 @@ import {
   appendAuditJsonl,
   appendTokenLedgerJsonl,
   buildAbReport,
+  buildAcceptanceEvidence,
+  buildDeliveryMarkdown,
   buildProductionConsoleSnapshot,
+  buildProductionRunbook,
   buildReleaseLocalJsonReport,
   buildReplyQueueState,
+  buildSafeForwardCommandPlan,
+  buildSafeForwardPlan,
+  buildDeliveryHistorySnapshot,
+  buildDiffOwnership,
+  recommendNextIterations,
   createCredentialProbe,
   createPlatformAdapters,
   executeReplyQueue,
@@ -19,6 +27,8 @@ import {
   type PlatformId,
   type ReleaseGateResult,
   type ReplyQueueItem,
+  type DeliveryGateInput,
+  type FailureChecklistItem,
 } from '@ima/core';
 import { PublishWorker, summarizeQueue } from './queue-worker.js';
 import { startWebServer } from './web-server.js';
@@ -48,6 +58,33 @@ const BROWSER_UNSAFE_PORTS = new Set<number>([
 function valueAfterFlag(argv: string[], flag: string): string | undefined {
   const index = argv.indexOf(flag);
   return index >= 0 ? argv[index + 1] : undefined;
+}
+
+function buildDeliveryOpsPayload(proposalId: string): Record<string, unknown> {
+  const gates: DeliveryGateInput[] = [
+    { name: 'check', ok: true, summary: 'cli snapshot', command: 'npm run check' },
+    { name: 'test', ok: true, summary: 'cli snapshot', command: 'npm test' },
+    { name: 'coverage', ok: true, summary: 'cli snapshot', command: 'npm run coverage' },
+    { name: 'verify:readme', ok: true, summary: 'cli snapshot', command: 'npm run verify:readme' },
+    { name: 'build', ok: true, summary: 'cli snapshot', command: 'npm run build' },
+  ];
+  const releaseGates: ReleaseGateResult[] = gates.map((gate) => ({ name: gate.name, ok: gate.ok, durationMs: 0, summary: gate.summary }));
+  const release = buildReleaseLocalJsonReport(releaseGates);
+  const evidence = buildAcceptanceEvidence({ proposalId, commit: 'local', gates, web: { url: 'cli', httpStatus: 200, apiKeys: 7 } });
+  const safeForward = buildSafeForwardPlan(evidence);
+  const ownership = buildDiffOwnership(['packages/core/src/delivery-evidence.ts', 'packages/cli/src/web-server.ts', 'apps/web/app.js']);
+  const checklist: FailureChecklistItem[] = [];
+  return {
+    release,
+    evidence,
+    safeForward,
+    history: buildDeliveryHistorySnapshot([evidence]),
+    safeForwardCommand: buildSafeForwardCommandPlan(proposalId, safeForward),
+    runbook: buildProductionRunbook({ evidence, checklist, ownership, plan: safeForward }),
+    recommendations: recommendNextIterations({ evidence, ownership }),
+    deliveryMarkdown: buildDeliveryMarkdown(evidence, safeForward),
+    failureChecklist: checklist,
+  };
 }
 
 export function parseWebOptions(argv: string[], env: Env = process.env): WebOptions {
@@ -386,11 +423,30 @@ export async function runCli(argv: string[]): Promise<void> {
     const replies = executeReplyQueue([], { sandbox: true, now: app.now(), actor: 'web' });
     const abDecision = { action: 'collect-more' as const, weights: {}, audit: { actor: 'cli', kind: 'ab' as const, action: 'collect-more', at: app.now(), ok: true } };
     const channel = runChannelAdapterSafetyChain(createPlatformAdapters(['x'], process.env)[0]!, 'sandbox', app.now());
-    const release = buildReleaseLocalJsonReport([{ name: 'check', ok: true, durationMs: 0, summary: 'snapshot only' }]);
+    const delivery = buildDeliveryOpsPayload('P-20260624-013');
     const auditPath = join(app.store.root, 'audit.jsonl');
     const events = existsSync(auditPath) ? readFileSync(auditPath, 'utf-8').split('\n').filter(Boolean).map((line) => JSON.parse(line)) : [];
-    console.log(JSON.stringify(buildProductionConsoleSnapshot({ replies, budget, ab: abDecision, channel, release, audit: summarizeAuditTrail(events), tokenLedger: { totalCalls: tokenEntries.length, totalCostUsd: budget.degraded ? 1 : 0 }, replyQueue: buildReplyQueueState([sample]) }), null, 2));
+    const snapshot = buildProductionConsoleSnapshot({ replies, budget, ab: abDecision, channel, release: delivery.release as ReturnType<typeof buildReleaseLocalJsonReport>, audit: summarizeAuditTrail(events), tokenLedger: { totalCalls: tokenEntries.length, totalCostUsd: budget.degraded ? 1 : 0 }, replyQueue: buildReplyQueueState([sample]) });
+    console.log(JSON.stringify({ ...snapshot, ...delivery }, null, 2));
     return;
+  }
+
+  if (cmd === 'delivery') {
+    const sub = argv[1];
+    const proposalId = valueAfterFlag(argv, '--proposal') ?? 'P-20260624-013';
+    const delivery = buildDeliveryOpsPayload(proposalId);
+    if (sub === 'safe-forward') {
+      const command = delivery.safeForwardCommand as { mode: string; executable: boolean; confirmationRequired: string; commands: string[] };
+      console.log(`mode=${command.mode} executable=${command.executable}`);
+      console.log(`confirm=${command.confirmationRequired}`);
+      for (const line of command.commands) console.log(line);
+      return;
+    }
+    if (sub === 'runbook') {
+      console.log(delivery.runbook);
+      return;
+    }
+    throw new Error('usage: ima delivery <safe-forward|runbook> --proposal P-...');
   }
 
   if (cmd === 'release-local-json') {

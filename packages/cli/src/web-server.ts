@@ -23,10 +23,15 @@ import {
   buildAcceptanceEvidence,
   buildDeliveryMarkdown,
   buildFailureChecklist,
+  buildProductionRunbook,
   buildProductionConsoleSnapshot,
   buildReleaseLocalJsonReport,
   buildReplyQueueState,
+  buildSafeForwardCommandPlan,
   buildSafeForwardPlan,
+  buildDeliveryHistorySnapshot,
+  buildDiffOwnership,
+  recommendNextIterations,
   createPlatformAdapters,
   createStubChannelAdapter,
   executeReplyQueue,
@@ -248,6 +253,12 @@ async function apiProduction(res: ServerResponse, ctx: HandleCtx): Promise<void>
     web: { url: 'web-server', httpStatus: 200, apiKeys: 7 },
   });
   const safeForward = buildSafeForwardPlan(evidence);
+  const ownership = buildDiffOwnership(['packages/core/src/delivery-evidence.ts', 'packages/cli/src/web-server.ts', 'apps/web/app.js']);
+  const history = buildDeliveryHistorySnapshot([evidence]);
+  const safeForwardCommand = buildSafeForwardCommandPlan('P-20260624-013', safeForward);
+  const checklist = buildFailureChecklist(gates);
+  const runbook = buildProductionRunbook({ evidence, checklist, ownership, plan: safeForward });
+  const recommendations = recommendNextIterations({ evidence, ownership });
   const snapshot = buildProductionConsoleSnapshot({
     replies: executeReplyQueue([], { sandbox: true, now: ctx.now(), actor: 'web' }),
     budget,
@@ -258,7 +269,7 @@ async function apiProduction(res: ServerResponse, ctx: HandleCtx): Promise<void>
     tokenLedger: { totalCalls: tokenEntries.length, totalCostUsd: tokenEntries.reduce((sum, entry) => sum + entry.costUsd, 0) },
     replyQueue: buildReplyQueueState([]),
   });
-  sendJson(res, { ...snapshot, evidence, safeForward, failureChecklist: buildFailureChecklist(gates), deliveryMarkdown: buildDeliveryMarkdown(evidence, safeForward) });
+  sendJson(res, { ...snapshot, evidence, safeForward, failureChecklist: checklist, deliveryMarkdown: buildDeliveryMarkdown(evidence, safeForward), history, safeForwardCommand, runbook, recommendations });
 }
 
 async function apiRoadmap(res: ServerResponse, _ctx: HandleCtx): Promise<void> {

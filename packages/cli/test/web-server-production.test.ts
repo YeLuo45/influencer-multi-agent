@@ -29,6 +29,10 @@ void test('web-server: /api/production exposes durable production operations sna
       safeForward: { canAdvance: boolean; nextStatuses: string[] };
       failureChecklist: Array<{ gate: string; hint: string }>;
       deliveryMarkdown: string;
+      history: { total: number; failedGateTop: Array<{ gate: string; count: number }> };
+      runbook: string;
+      recommendations: Array<{ id: string }>;
+      safeForwardCommand: { mode: string; confirmationRequired: string };
     };
     assert.equal(response.status, 200);
     assert.equal(json.tokenLedger.totalCalls, 1);
@@ -46,6 +50,11 @@ void test('web-server: /api/production exposes durable production operations sna
     assert.deepEqual(json.safeForward.nextStatuses, ['in_test_acceptance', 'accepted', 'deployed', 'delivered']);
     assert.deepEqual(json.failureChecklist, []);
     assert.match(json.deliveryMarkdown, /Delivery Evidence/);
+    assert.equal(json.history.total, 1);
+    assert.equal(json.safeForwardCommand.mode, 'dry-run');
+    assert.match(json.safeForwardCommand.confirmationRequired, /EXECUTE P-20260624-013/);
+    assert.match(json.runbook, /Production Runbook/);
+    assert.ok(json.recommendations.some((rec) => rec.id === 'history-ledger-compaction'));
   } finally {
     await handle.close();
     rmSync(root, { recursive: true, force: true });

@@ -6,6 +6,11 @@ import {
   buildDiffOwnership,
   buildFailureChecklist,
   buildSafeForwardPlan,
+  buildDeliveryHistorySnapshot,
+  buildSafeForwardCommandPlan,
+  buildProductionRunbook,
+  ingestCiEvidence,
+  recommendNextIterations,
   type DeliveryGateInput,
 } from '../src/delivery-evidence.js';
 
@@ -68,4 +73,60 @@ void test('buildDeliveryMarkdown renders copy-ready delivery report with gates a
   assert.match(markdown, /\| verify:readme \| pass \|/);
   assert.match(markdown, /MCP next: in_test_acceptance → accepted → deployed → delivered/);
   assert.match(markdown, /Local web: http:\/\/127\.0\.0\.1:5189\/ HTTP 200/);
+});
+
+void test('buildDeliveryHistorySnapshot summarizes recent evidence trend and failed gate frequency', () => {
+  const green = buildAcceptanceEvidence({ proposalId: 'P-green', commit: 'a1', gates: gates.map((gate) => ({ ...gate, ok: true })) });
+  const red = buildAcceptanceEvidence({ proposalId: 'P-red', commit: 'a2', gates });
+  const snapshot = buildDeliveryHistorySnapshot([green, red, green], 2);
+  assert.equal(snapshot.total, 3);
+  assert.equal(snapshot.recent.length, 2);
+  assert.equal(snapshot.lastDeliverableCommit, 'a1');
+  assert.deepEqual(snapshot.failedGateTop, [{ gate: 'verify:readme', count: 1 }]);
+});
+
+void test('buildSafeForwardCommandPlan stays dry-run unless explicit confirmation matches proposal id', () => {
+  const evidence = buildAcceptanceEvidence({ proposalId: 'P-20260624-013', gates: gates.map((gate) => ({ ...gate, ok: true })) });
+  const plan = buildSafeForwardPlan(evidence);
+  const dry = buildSafeForwardCommandPlan('P-20260624-013', plan);
+  assert.equal(dry.mode, 'dry-run');
+  assert.equal(dry.executable, false);
+  assert.match(dry.commands[0] ?? '', /update-proposal-status/);
+
+  const execute = buildSafeForwardCommandPlan('P-20260624-013', plan, 'EXECUTE P-20260624-013');
+  assert.equal(execute.mode, 'execute');
+  assert.equal(execute.executable, true);
+});
+
+void test('buildProductionRunbook combines evidence, failures, diff ownership, and safe-forward plan', () => {
+  const evidence = buildAcceptanceEvidence({ proposalId: 'P-20260624-013', gates });
+  const runbook = buildProductionRunbook({
+    evidence,
+    checklist: buildFailureChecklist(gates),
+    ownership: buildDiffOwnership(['packages/core/src/x.ts', 'docs/prd.v4.md']),
+    plan: buildSafeForwardPlan(evidence),
+  });
+  assert.match(runbook, /# Production Runbook — P-20260624-013/);
+  assert.match(runbook, /verify:readme/);
+  assert.match(runbook, /productCode: 1/);
+  assert.match(runbook, /MCP next: test_failed/);
+});
+
+void test('ingestCiEvidence merges local and CI gates without losing failed remote checks', () => {
+  const local = buildAcceptanceEvidence({ proposalId: 'P-20260624-013', gates: gates.map((gate) => ({ ...gate, ok: true })) });
+  const merged = ingestCiEvidence(local, [
+    { name: 'github-actions', ok: false, summary: 'node-22 failed', command: 'gh run view' },
+  ]);
+  assert.equal(merged.ok, false);
+  assert.deepEqual(merged.failedGates, ['github-actions']);
+  assert.equal(merged.total, 6);
+});
+
+void test('recommendNextIterations ranks next directions from failures, diff ownership, and coverage weakness', () => {
+  const evidence = buildAcceptanceEvidence({ proposalId: 'P-20260624-013', gates });
+  const ownership = buildDiffOwnership(['apps/web/app.js', 'packages/cli/src/web-server.ts', 'packages/core/src/delivery-evidence.ts']);
+  const recs = recommendNextIterations({ evidence, ownership, weakCoverageFiles: ['packages/cli/src/web-server.ts'] });
+  assert.equal(recs[0]?.id, 'stabilize-readme-gate');
+  assert.ok(recs.some((rec) => rec.id === 'web-action-center'));
+  assert.ok(recs.some((rec) => rec.id === 'route-coverage-hardening'));
 });

@@ -88,9 +88,21 @@ void test('cli: production and release-local-json print machine-readable JSON', 
   try {
     const production = runCli(['production'], root);
     assert.equal(production.status, 0);
-    const snapshot = JSON.parse(production.stdout) as { replySafety: { readyForRealReply: boolean }; release: { ok: boolean } };
+    const snapshot = JSON.parse(production.stdout) as { replySafety: { readyForRealReply: boolean }; release: { ok: boolean }; history: { total: number }; recommendations: Array<{ id: string }>; runbook: string };
     assert.equal(snapshot.replySafety.readyForRealReply, false);
     assert.equal(snapshot.release.ok, true);
+    assert.equal(snapshot.history.total, 1);
+    assert.ok(snapshot.recommendations.length >= 1);
+    assert.match(snapshot.runbook, /Production Runbook/);
+
+    const safeForward = runCli(['delivery', 'safe-forward', '--proposal', 'P-20260624-013'], root);
+    assert.equal(safeForward.status, 0);
+    assert.match(safeForward.stdout, /mode=dry-run/);
+    assert.match(safeForward.stdout, /EXECUTE P-20260624-013/);
+
+    const runbook = runCli(['delivery', 'runbook', '--proposal', 'P-20260624-013'], root);
+    assert.equal(runbook.status, 0);
+    assert.match(runbook.stdout, /Production Runbook — P-20260624-013/);
 
     const release = runCli(['release-local-json'], root);
     assert.equal(release.status, 0);

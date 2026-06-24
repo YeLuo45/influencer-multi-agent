@@ -2,6 +2,17 @@
 
 多智能体跨平台大 V 全自动运营交付系统：根据网上热点生成内容并跨平台发布。
 
+## v4.2 新增（Delivery Automation Full Loop）
+
+| 方向 | 实现 |
+|---|---|
+| **Delivery history ledger model** | `buildDeliveryHistorySnapshot()` 汇总最近 evidence、last deliverable commit 和 failed gate Top |
+| **Executable safe-forward CLI** | `ima delivery safe-forward --proposal P-...` 默认 dry-run，输出确认 token 与 MCP 状态推进命令 |
+| **Production runbook generator** | `ima delivery runbook --proposal P-...` 从 evidence/checklist/diff ownership/safe-forward 生成 copy-ready runbook |
+| **Web action center payload** | `/api/production` 暴露 `history`、`safeForwardCommand`、`runbook`、`recommendations`，生产运营 tab 直接显示 |
+| **CI evidence ingestion** | `ingestCiEvidence()` 将本地门禁与 GitHub Actions/CI gate 合并，不丢远端失败项 |
+| **Iteration recommender** | `recommendNextIterations()` 根据 failed gates、diff ownership、coverage weak spots 生成下一轮方向 |
+
 ## v3.6 新增（Delivery Evidence & Safe Forward Gate）
 
 | 方向 | 实现 |
@@ -229,6 +240,8 @@ npm run cli channel-test <platform>            # ping X/Reddit/B站/微博/小�
 npm run cli publish-cli [--major|--minor|--rc] # 计算 next semver + tarball 路径（@ima/cli 全局包发布铺路）
 npm run cli reply send --sandbox          # 沙盒回复执行器；追加 .ima/audit.jsonl，不触达真实平台
 npm run cli production                     # 输出生产控制台 JSON snapshot
+npm run cli delivery safe-forward --proposal P-20260624-013  # 输出 safe-forward dry-run MCP 状态推进命令
+npm run cli delivery runbook --proposal P-20260624-013       # 输出 copy-ready production runbook
 npm run cli release-local-json             # 输出 release:local 机器可读 JSON 报告
 node --test --import tsx packages/core/test/publish-rate-limit.test.ts   # 验证 PublishAgent per-platform 限流
 node --test --import tsx packages/core/test/sandbox-publish.test.ts      # 验证 sandbox 发布闭环预检

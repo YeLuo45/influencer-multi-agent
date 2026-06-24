@@ -131,3 +131,84 @@ export function buildDeliveryMarkdown(evidence: AcceptanceEvidence, plan: SafeFo
   lines.push('', `MCP next: ${plan.nextStatuses.join(' → ')}`, `Reason: ${plan.reason}`, '');
   return `${lines.join('\n')}\n`;
 }
+
+export interface DeliveryHistorySnapshot {
+  total: number;
+  recent: AcceptanceEvidence[];
+  lastDeliverableCommit: string | null;
+  failedGateTop: Array<{ gate: string; count: number }>;
+}
+
+export function buildDeliveryHistorySnapshot(items: AcceptanceEvidence[], limit = 5): DeliveryHistorySnapshot {
+  const failedCounts: Record<string, number> = {};
+  let lastDeliverableCommit: string | null = null;
+  for (const item of items) {
+    if (item.ok) lastDeliverableCommit = item.commit;
+    for (const gate of item.failedGates) failedCounts[gate] = (failedCounts[gate] ?? 0) + 1;
+  }
+  const failedGateTop = Object.entries(failedCounts).map(([gate, count]) => ({ gate, count })).sort((a, b) => b.count - a.count || a.gate.localeCompare(b.gate));
+  return { total: items.length, recent: items.slice(Math.max(0, items.length - limit)).map((item) => ({ ...item, gates: item.gates.map((gate) => ({ ...gate })) })), lastDeliverableCommit, failedGateTop };
+}
+
+export interface SafeForwardCommandPlan {
+  mode: 'dry-run' | 'execute';
+  executable: boolean;
+  commands: string[];
+  confirmationRequired: string;
+}
+
+export function buildSafeForwardCommandPlan(proposalId: string, plan: SafeForwardPlan, confirmation?: string): SafeForwardCommandPlan {
+  const confirmationRequired = `EXECUTE ${proposalId}`;
+  const executable = plan.canAdvance && confirmation === confirmationRequired;
+  const commands = plan.nextStatuses.map((status) => `python3 mcp_aisp.py update-proposal-status --proposal-id ${proposalId} --status ${status}`);
+  return { mode: executable ? 'execute' : 'dry-run', executable, commands, confirmationRequired };
+}
+
+export function buildProductionRunbook(input: { evidence: AcceptanceEvidence; checklist: FailureChecklistItem[]; ownership: DiffOwnership; plan: SafeForwardPlan }): string {
+  const own = input.ownership;
+  const lines = [
+    `# Production Runbook — ${input.evidence.proposalId}`,
+    '',
+    `Summary: ${input.evidence.summary}`,
+    `MCP next: ${input.plan.nextStatuses.join(' → ')}`,
+    '',
+    '## Failure Checklist',
+    ...(input.checklist.length === 0 ? ['- none'] : input.checklist.map((item) => `- ${item.gate}: ${item.command} — ${item.hint}`)),
+    '',
+    '## Diff Ownership',
+    `- proposalDocs: ${own.proposalDocs.length}`,
+    `- productCode: ${own.productCode.length}`,
+    `- tests: ${own.tests.length}`,
+    `- generatedArtifacts: ${own.generatedArtifacts.length}`,
+    `- docs: ${own.docs.length}`,
+    `- other: ${own.other.length}`,
+    '',
+  ];
+  return `${lines.join('\n')}\n`;
+}
+
+export function ingestCiEvidence(local: AcceptanceEvidence, ciGates: DeliveryGateInput[]): AcceptanceEvidence {
+  return buildAcceptanceEvidence({ proposalId: local.proposalId, commit: local.commit, gates: [...local.gates, ...ciGates], ...(local.web ? { web: local.web } : {}) });
+}
+
+export interface IterationRecommendation {
+  id: string;
+  title: string;
+  score: number;
+  reason: string;
+}
+
+export function recommendNextIterations(input: { evidence: AcceptanceEvidence; ownership: DiffOwnership; weakCoverageFiles?: string[] }): IterationRecommendation[] {
+  const recs: IterationRecommendation[] = [];
+  if (input.evidence.failedGates.includes('verify:readme')) {
+    recs.push({ id: 'stabilize-readme-gate', title: 'Stabilize README verification side effects', score: 100, reason: 'verify:readme is currently a failed hard gate' });
+  }
+  if (input.ownership.productCode.some((path) => path.startsWith('apps/web/') || path.includes('/web-server'))) {
+    recs.push({ id: 'web-action-center', title: 'Expose delivery actions in the Web action center', score: 80, reason: 'recent changes touch operator-facing web surfaces' });
+  }
+  if ((input.weakCoverageFiles ?? []).length > 0) {
+    recs.push({ id: 'route-coverage-hardening', title: 'Harden weak route coverage', score: 70, reason: `weak coverage: ${(input.weakCoverageFiles ?? []).join(', ')}` });
+  }
+  recs.push({ id: 'history-ledger-compaction', title: 'Compact delivery history ledger', score: 40, reason: 'keep long-running unattended evidence cheap to read' });
+  return recs.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+}

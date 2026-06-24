@@ -19,6 +19,8 @@ const checks = [
   { name: 'targeted web roadmap ui test', cmd: 'node', args: ['--test', '--import', 'tsx', 'packages/cli/test/web-ui-roadmap.test.ts'] },
   { name: 'prepublish gate CLI', cmd: 'npm', args: ['run', 'cli', 'prepublish-gate'] },
   { name: 'production snapshot CLI', cmd: 'npm', args: ['run', 'cli', 'production'] },
+  { name: 'delivery safe-forward CLI', cmd: 'npm', args: ['run', 'cli', 'delivery', 'safe-forward', '--proposal', 'P-20260624-013'] },
+  { name: 'delivery runbook CLI', cmd: 'npm', args: ['run', 'cli', 'delivery', 'runbook', '--proposal', 'P-20260624-013'] },
   { name: 'release local json CLI', cmd: 'npm', args: ['run', 'cli', 'release-local-json'] },
 ];
 
