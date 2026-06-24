@@ -22,11 +22,15 @@ import {
   buildAbReport,
   buildProductionConsoleSnapshot,
   buildReleaseLocalJsonReport,
+  buildReplyQueueState,
+  createPlatformAdapters,
   createStubChannelAdapter,
   executeReplyQueue,
+  parseTokenLedgerJsonl,
   planLlmProviderWithBudget,
   runChannelAdapterSafetyChain,
   selectLlm,
+  summarizeAuditTrail,
   type Content,
   type ContentStage,
   type LlmSelection,
@@ -107,6 +111,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: HandleCtx)
   if (path === '/api/llm/probe' && req.method === 'POST') return await apiLlmProbe(res, ctx);
   if (path === '/api/stats') return await apiStats(res, ctx);
   if (path === '/api/metrics') return await apiMetricsDashboard(res, ctx);
+  if (path === '/api/production') return await apiProduction(res, ctx);
   if (path === '/api/roadmap') return await apiRoadmap(res, ctx);
   if (path === '/api/events') return await apiEvents(res, ctx);
   if (path === '/metrics') return await apiMetrics(res, ctx);
@@ -204,6 +209,36 @@ async function apiMetrics(res: ServerResponse, ctx: HandleCtx): Promise<void> {
   const { createPersistentMetrics, renderPrometheusMetrics } = await import('@ima/core');
   const metrics = createPersistentMetrics({ rootDir: dirname(ctx.store.root) });
   send(res, 200, 'text/plain; version=0.0.4', renderPrometheusMetrics(metrics.snapshot()));
+}
+
+async function apiProduction(res: ServerResponse, ctx: HandleCtx): Promise<void> {
+  const tokenPath = ctx.store.path('token-ledger.jsonl');
+  const auditPath = ctx.store.path('audit.jsonl');
+  const tokenEntries = existsSync(tokenPath) ? parseTokenLedgerJsonl(readFileSync(tokenPath, 'utf-8')) : [];
+  const auditEvents = existsSync(auditPath)
+    ? readFileSync(auditPath, 'utf-8').split('\n').filter(Boolean).map((line) => JSON.parse(line))
+    : [];
+  const budget = planLlmProviderWithBudget(
+    {
+      totalCalls: tokenEntries.length,
+      totalTokens: tokenEntries.reduce((sum, entry) => sum + entry.totalTokens, 0),
+      totalCostUsd: tokenEntries.reduce((sum, entry) => sum + entry.costUsd, 0),
+      byModel: {},
+      byDay: {},
+    },
+    { day: ctx.now().slice(0, 10), dailyBudgetUsd: 1, monthlyBudgetUsd: 10, configuredProvider: ctx.llm.provider },
+  );
+  const channel = runChannelAdapterSafetyChain(createPlatformAdapters(['x'], process.env)[0]!, 'sandbox', ctx.now());
+  sendJson(res, buildProductionConsoleSnapshot({
+    replies: executeReplyQueue([], { sandbox: true, now: ctx.now(), actor: 'web' }),
+    budget,
+    ab: { action: 'collect-more', weights: {}, audit: { actor: 'web', kind: 'ab', action: 'collect-more', at: ctx.now(), ok: true } },
+    channel,
+    release: buildReleaseLocalJsonReport([{ name: 'check', ok: true, durationMs: 0, summary: 'web snapshot' }]),
+    audit: summarizeAuditTrail(auditEvents),
+    tokenLedger: { totalCalls: tokenEntries.length, totalCostUsd: tokenEntries.reduce((sum, entry) => sum + entry.costUsd, 0) },
+    replyQueue: buildReplyQueueState([]),
+  }));
 }
 
 async function apiRoadmap(res: ServerResponse, _ctx: HandleCtx): Promise<void> {

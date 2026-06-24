@@ -2,6 +2,15 @@
 
 多智能体跨平台大 V 全自动运营交付系统：根据网上热点生成内容并跨平台发布。
 
+## v2.9 新增（Production Operations Console）
+
+| 方向 | 实现 |
+|---|---|
+| **生产运营 API** | `GET /api/production` 读取 `.ima/token-ledger.jsonl` 与 `.ima/audit.jsonl`，返回 replyQueue、tokenLedger、audit、channel、release action 和 budget snapshot |
+| **Web 生产运营中心** | Web 首页新增「生产运营」tab，主界面直接展示 `/api/production` 的上线前运营验收快照，不再只藏在路线图 JSON 中 |
+| **README 门禁同步** | `npm run verify:readme` 新增 `packages/cli/test/web-server-production.test.ts`，确保生产运营 API 是真实可执行验收项 |
+| **提案文档 v2** | `docs/prd.v2.md` 与 `docs/technical-solution.v2.md` 记录无人值守本轮 Production Operations Console 范围与验收标准 |
+
 ## v2.8 新增（无人值守生产闭环：真实发送前安全门禁）
 
 | 方向 | 实现 |

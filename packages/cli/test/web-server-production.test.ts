@@ -1,0 +1,41 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { startWebServer, type WebServerHandle } from '../src/web-server.js';
+import { JsonStore } from '@ima/core';
+
+async function boot(): Promise<{ handle: WebServerHandle; root: string }> {
+  const root = mkdtempSync(join(tmpdir(), 'ima-production-web-'));
+  const store = new JsonStore({ rootDir: root });
+  writeFileSync(join(store.root, 'token-ledger.jsonl'), JSON.stringify({ provider: 'mock', model: 'mock-llm', promptTokens: 3, completionTokens: 4, totalTokens: 7, costUsd: 0.01, at: '2026-06-24T00:00:00.000Z' }) + '\n');
+  writeFileSync(join(store.root, 'audit.jsonl'), JSON.stringify({ actor: 'cli', kind: 'reply', action: 'sandbox-reply', at: '2026-06-24T00:00:00.000Z', ok: true }) + '\n');
+  const handle = await startWebServer({ port: 0, store, now: () => '2026-06-24T00:00:00.000Z' });
+  return { handle, root };
+}
+
+void test('web-server: /api/production exposes durable production operations snapshot', async () => {
+  const { handle, root } = await boot();
+  try {
+    const response = await fetch(`${handle.url}/api/production`);
+    const json = await response.json() as {
+      replyQueue: { total: number; next: unknown };
+      tokenLedger: { totalCalls: number; totalCostUsd: number };
+      audit: { total: number; byKind: Record<string, number> };
+      release: { action: { canDeploy: boolean; command: string } };
+      channel: { steps: string[] };
+    };
+    assert.equal(response.status, 200);
+    assert.equal(json.tokenLedger.totalCalls, 1);
+    assert.equal(json.tokenLedger.totalCostUsd, 0.01);
+    assert.equal(json.audit.total, 1);
+    assert.equal(json.audit.byKind.reply, 1);
+    assert.equal(json.release.action.canDeploy, true);
+    assert.equal(json.release.action.command, 'git push origin master');
+    assert.ok(json.channel.steps.includes('auth-probe:false'));
+  } finally {
+    await handle.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

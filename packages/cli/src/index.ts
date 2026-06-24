@@ -2,14 +2,21 @@ import { createApp, saveContent, listContentIds, loadContent, savePersonas, fetc
 import {
   Pipeline,
   appendAuditJsonl,
+  appendTokenLedgerJsonl,
   buildAbReport,
   buildProductionConsoleSnapshot,
   buildReleaseLocalJsonReport,
-  createStubChannelAdapter,
+  buildReplyQueueState,
+  createCredentialProbe,
+  createPlatformAdapters,
   executeReplyQueue,
+  parseTokenLedgerJsonl,
   planLlmProviderWithBudget,
   runChannelAdapterSafetyChain,
   runDryRun,
+  summarizeAuditTrail,
+  workReplyQueue,
+  type PlatformId,
   type ReleaseGateResult,
   type ReplyQueueItem,
 } from '@ima/core';
@@ -331,28 +338,58 @@ export async function runCli(argv: string[]): Promise<void> {
 
   if (cmd === 'reply') {
     const sub = argv[1];
-    if (!['send', 'verify', 'cleanup'].includes(sub ?? '')) throw new Error('usage: ima reply <send|verify|cleanup> [--sandbox]');
+    if (!['send', 'verify', 'cleanup', 'queue'].includes(sub ?? '')) throw new Error('usage: ima reply <send|verify|cleanup|queue> [--sandbox]');
     const sandbox = argv.includes('--sandbox') || sub !== 'send' || !argv.includes('--real');
     const sample: ReplyQueueItem = {
       id: 'reply-sandbox-x-1', platform: 'x', postId: 'sandbox-post', comment: 'source?',
       draft: 'Thanks — source is linked here.', priority: 10, status: 'queued', createdAt: app.now(),
     };
-    const result = executeReplyQueue([sample], { sandbox, now: app.now(), actor: 'cli' });
+    if (sub === 'queue') {
+      console.log(JSON.stringify(buildReplyQueueState([sample]), null, 2));
+      return;
+    }
+    const worked = workReplyQueue([sample], { limit: 1, sandbox, now: app.now() });
     const auditPath = join(app.store.root, 'audit.jsonl');
     mkdirSync(dirname(auditPath), { recursive: true });
     const existing = existsSync(auditPath) ? readFileSync(auditPath, 'utf-8') : '';
-    writeFileSync(auditPath, appendAuditJsonl(existing, result.audit), 'utf-8');
-    console.log(`[reply] ${sub} mode=${result.mode} sent=${result.sent.length} audit=${result.audit.length}`);
+    writeFileSync(auditPath, appendAuditJsonl(existing, worked.result.audit), 'utf-8');
+    console.log(`[reply] ${sub} mode=${worked.result.mode} sent=${worked.result.sent.length} audit=${worked.result.audit.length}`);
+    return;
+  }
+
+  if (cmd === 'token-ledger') {
+    const ledgerPath = join(app.store.root, 'token-ledger.jsonl');
+    mkdirSync(dirname(ledgerPath), { recursive: true });
+    const existing = existsSync(ledgerPath) ? readFileSync(ledgerPath, 'utf-8') : '';
+    const entry = { provider: app.llm.provider, model: app.llm.model, promptTokens: 1, completionTokens: 1, totalTokens: 2, costUsd: 0, at: app.now() };
+    writeFileSync(ledgerPath, appendTokenLedgerJsonl(existing, [entry]), 'utf-8');
+    console.log(`[token-ledger] entries=${parseTokenLedgerJsonl(readFileSync(ledgerPath, 'utf-8')).length}`);
+    return;
+  }
+
+  if (cmd === 'channel-adapters') {
+    const platforms: PlatformId[] = ['x', 'reddit', 'youtube', 'bilibili', 'weibo', 'xiaohongshu'];
+    const adapters = createPlatformAdapters(platforms, process.env);
+    for (const adapter of adapters) {
+      const probe = createCredentialProbe(adapter.platform, process.env);
+      const chain = runChannelAdapterSafetyChain(adapter, 'sandbox', app.now());
+      console.log(`${adapter.platform} ${probe.envKey} auth=${probe.ok} chain=${chain.ok}`);
+    }
     return;
   }
 
   if (cmd === 'production') {
-    const budget = planLlmProviderWithBudget({ totalCalls: 0, totalTokens: 0, totalCostUsd: 0, byModel: {}, byDay: {} }, { day: app.now().slice(0, 10), dailyBudgetUsd: 1, monthlyBudgetUsd: 10, configuredProvider: app.llm.provider });
+    const tokenPath = join(app.store.root, 'token-ledger.jsonl');
+    const tokenEntries = existsSync(tokenPath) ? parseTokenLedgerJsonl(readFileSync(tokenPath, 'utf-8')) : [];
+    const budget = planLlmProviderWithBudget({ totalCalls: tokenEntries.length, totalTokens: tokenEntries.reduce((s, e) => s + e.totalTokens, 0), totalCostUsd: tokenEntries.reduce((s, e) => s + e.costUsd, 0), byModel: {}, byDay: {} }, { day: app.now().slice(0, 10), dailyBudgetUsd: 1, monthlyBudgetUsd: 10, configuredProvider: app.llm.provider });
+    const sample: ReplyQueueItem = { id: 'reply-sandbox-x-1', platform: 'x', postId: 'sandbox-post', comment: 'source?', draft: 'Thanks — source is linked here.', priority: 10, status: 'queued', createdAt: app.now() };
     const replies = executeReplyQueue([], { sandbox: true, now: app.now(), actor: 'web' });
     const abDecision = { action: 'collect-more' as const, weights: {}, audit: { actor: 'cli', kind: 'ab' as const, action: 'collect-more', at: app.now(), ok: true } };
-    const channel = runChannelAdapterSafetyChain(createStubChannelAdapter('x', { credential: process.env.IMA_X_TOKEN }), 'sandbox', app.now());
+    const channel = runChannelAdapterSafetyChain(createPlatformAdapters(['x'], process.env)[0]!, 'sandbox', app.now());
     const release = buildReleaseLocalJsonReport([{ name: 'check', ok: true, durationMs: 0, summary: 'snapshot only' }]);
-    console.log(JSON.stringify(buildProductionConsoleSnapshot({ replies, budget, ab: abDecision, channel, release }), null, 2));
+    const auditPath = join(app.store.root, 'audit.jsonl');
+    const events = existsSync(auditPath) ? readFileSync(auditPath, 'utf-8').split('\n').filter(Boolean).map((line) => JSON.parse(line)) : [];
+    console.log(JSON.stringify(buildProductionConsoleSnapshot({ replies, budget, ab: abDecision, channel, release, audit: summarizeAuditTrail(events), tokenLedger: { totalCalls: tokenEntries.length, totalCostUsd: budget.degraded ? 1 : 0 }, replyQueue: buildReplyQueueState([sample]) }), null, 2));
     return;
   }
 

@@ -1,7 +1,7 @@
-import type { AbSignificanceResult, ReplyQueueItem, TokenLedgerSummary } from './roadmap.js';
-import type { PlatformId } from './types.js';
+import type { AbSignificanceResult, ReplyQueueItem, TokenLedgerSummary, TokenUsageEntry } from './roadmap.js';
+import type { Idea, PlatformId } from './types.js';
 
-export type ProductionAuditKind = 'reply' | 'publish' | 'budget' | 'ab' | 'channel' | 'release';
+export type ProductionAuditKind = 'reply' | 'publish' | 'budget' | 'ab' | 'channel' | 'release' | 'run' | 'llm';
 
 export interface ProductionAuditEvent {
   actor: string;
@@ -47,6 +47,29 @@ export function appendAuditJsonl(existing: string, events: ProductionAuditEvent[
   return `${prefix}${events.map((event) => JSON.stringify(event)).join('\n')}${events.length > 0 ? '\n' : ''}`;
 }
 
+export function auditFromAction(input: { actor: string; kind: ProductionAuditKind; action: string; ok?: boolean; target?: string; note?: string; at?: string }): ProductionAuditEvent {
+  return { actor: input.actor, kind: input.kind, action: input.action, at: input.at ?? new Date().toISOString(), ok: input.ok ?? true, ...(input.target ? { target: input.target } : {}), ...(input.note ? { note: input.note } : {}) };
+}
+
+export function summarizeAuditTrail(events: ProductionAuditEvent[]): { total: number; failures: number; byKind: Record<string, number>; latestAt: string | null } {
+  const out = { total: events.length, failures: 0, byKind: {} as Record<string, number>, latestAt: null as string | null };
+  for (const event of events) {
+    if (!event.ok) out.failures += 1;
+    out.byKind[event.kind] = (out.byKind[event.kind] ?? 0) + 1;
+    out.latestAt = out.latestAt === null || event.at > out.latestAt ? event.at : out.latestAt;
+  }
+  return out;
+}
+
+export function appendTokenLedgerJsonl(existing: string, entries: TokenUsageEntry[]): string {
+  const prefix = existing.trim().length > 0 ? `${existing.trim()}\n` : '';
+  return `${prefix}${entries.map((entry) => JSON.stringify(entry)).join('\n')}${entries.length > 0 ? '\n' : ''}`;
+}
+
+export function parseTokenLedgerJsonl(jsonl: string): TokenUsageEntry[] {
+  return jsonl.split('\n').map((line) => line.trim()).filter(Boolean).map((line) => JSON.parse(line) as TokenUsageEntry);
+}
+
 export function planLlmProviderWithBudget(
   summary: TokenLedgerSummary,
   opts: { day: string; dailyBudgetUsd: number; monthlyBudgetUsd: number; configuredProvider: string; fallbackProvider?: string },
@@ -87,12 +110,26 @@ export function applyAbWinnerDecision(
   };
 }
 
+export function applyVariantWeightsToIdeas(ideas: Idea[], weights: Record<string, number>): Idea[] {
+  return ideas
+    .map((idea) => ({ ...idea, score: Math.min(1, Math.round(idea.score * (weights[idea.variantTag ?? ''] ?? 1) * 1000) / 1000) }))
+    .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+}
+
 export interface ChannelAdapterV1 {
   platform: PlatformId;
   authProbe: () => { ok: boolean; detail: string };
   sandboxPost: (body: string) => { ok: boolean; postId: string };
   verify: (postId: string) => { ok: boolean; detail: string };
   cleanup: (postId: string) => { ok: boolean; detail: string };
+}
+
+export function createCredentialProbe(platform: PlatformId, env: Record<string, string | undefined>): { ok: boolean; envKey: string; detail: string } {
+  const envKey = {
+    x: 'IMA_X_TOKEN', reddit: 'IMA_REDDIT_TOKEN', youtube: 'IMA_YOUTUBE_TOKEN', bilibili: 'IMA_BILIBILI_TOKEN', weibo: 'IMA_WEIBO_TOKEN', xiaohongshu: 'IMA_XHS_TOKEN',
+  }[platform];
+  const value = env[envKey];
+  return { ok: Boolean(value && value.trim().length > 0), envKey, detail: value ? 'credential present' : 'missing credential' };
 }
 
 export function createStubChannelAdapter(platform: PlatformId, opts: { credential?: string } = {}): ChannelAdapterV1 {
@@ -103,6 +140,10 @@ export function createStubChannelAdapter(platform: PlatformId, opts: { credentia
     verify: (postId) => ({ ok: postId.startsWith(`sandbox-${platform}-`), detail: 'sandbox post visible' }),
     cleanup: (postId) => ({ ok: postId.startsWith(`sandbox-${platform}-`), detail: 'sandbox post cleaned' }),
   };
+}
+
+export function createPlatformAdapters(platforms: PlatformId[], env: Record<string, string | undefined>): ChannelAdapterV1[] {
+  return platforms.map((platform) => createStubChannelAdapter(platform, { credential: env[createCredentialProbe(platform, env).envKey] }));
 }
 
 export function runChannelAdapterSafetyChain(adapter: ChannelAdapterV1, body: string, now = new Date().toISOString()): { ok: boolean; steps: string[]; audit: ProductionAuditEvent[] } {
@@ -122,6 +163,22 @@ export function runChannelAdapterSafetyChain(adapter: ChannelAdapterV1, body: st
   return { ok: auth.ok && post.ok && verified.ok && cleaned.ok, steps, audit };
 }
 
+export function buildReplyQueueState(items: ReplyQueueItem[]): { total: number; byStatus: Record<string, number>; next: ReplyQueueItem | null } {
+  const byStatus: Record<string, number> = { queued: 0, sent: 0, skipped: 0 };
+  for (const item of items) byStatus[item.status] = (byStatus[item.status] ?? 0) + 1;
+  const next = [...items].filter((item) => item.status === 'queued').sort((a, b) => b.priority - a.priority || a.id.localeCompare(b.id))[0] ?? null;
+  return { total: items.length, byStatus, next };
+}
+
+export function workReplyQueue(items: ReplyQueueItem[], opts: { limit?: number; sandbox?: boolean; now?: string } = {}): { items: ReplyQueueItem[]; result: ReplyExecutionResult } {
+  const limit = opts.limit ?? items.length;
+  const selected = [...items].filter((item) => item.status === 'queued').sort((a, b) => b.priority - a.priority || a.id.localeCompare(b.id)).slice(0, limit);
+  const selectedIds = new Set(selected.map((item) => item.id));
+  const result = executeReplyQueue(selected, { sandbox: opts.sandbox ?? true, now: opts.now });
+  const statusById = new Map(result.sent.map((item) => [item.id, item.status]));
+  return { items: items.map((item) => selectedIds.has(item.id) ? { ...item, status: statusById.get(item.id) ?? item.status } : { ...item }), result };
+}
+
 export interface ReleaseGateResult {
   name: string;
   ok: boolean;
@@ -136,19 +193,31 @@ export function buildReleaseLocalJsonReport(gates: ReleaseGateResult[]): { ok: b
   return { ok: failed.length === 0, gates: gates.map((gate) => ({ ...gate })), failed, markdown: `${markdown}\n` };
 }
 
+export function buildReleaseActionPlan(report: ReturnType<typeof buildReleaseLocalJsonReport>): { canDeploy: boolean; command: string; hint: string } {
+  return report.ok
+    ? { canDeploy: true, command: 'git push origin master', hint: 'all gates passed' }
+    : { canDeploy: false, command: 'npm run release:local', hint: `fix failed gates: ${report.failed.join(', ')}` };
+}
+
 export function buildProductionConsoleSnapshot(input: {
   replies: ReplyExecutionResult;
   budget: ReturnType<typeof planLlmProviderWithBudget>;
   ab: ReturnType<typeof applyAbWinnerDecision>;
   channel: ReturnType<typeof runChannelAdapterSafetyChain>;
   release: ReturnType<typeof buildReleaseLocalJsonReport>;
+  audit?: ReturnType<typeof summarizeAuditTrail>;
+  tokenLedger?: { totalCalls: number; totalCostUsd: number };
+  replyQueue?: ReturnType<typeof buildReplyQueueState>;
 }): Record<string, unknown> {
   return {
     replySafety: { mode: input.replies.mode, sent: input.replies.sent.length, readyForRealReply: input.replies.readyForRealReply },
+    replyQueue: input.replyQueue ?? { total: input.replies.sent.length, byStatus: {}, next: null },
     budget: { provider: input.budget.provider, degraded: input.budget.degraded, reason: input.budget.reason },
+    tokenLedger: input.tokenLedger ?? { totalCalls: 0, totalCostUsd: 0 },
     ab: { action: input.ab.action, weights: input.ab.weights },
     channel: { ok: input.channel.ok, steps: input.channel.steps },
-    release: { ok: input.release.ok, failed: input.release.failed },
+    release: { ok: input.release.ok, failed: input.release.failed, action: buildReleaseActionPlan(input.release) },
+    audit: input.audit ?? { total: input.replies.audit.length + 1 + 1 + input.channel.audit.length, failures: 0, byKind: {}, latestAt: null },
     auditCount: input.replies.audit.length + 1 + 1 + input.channel.audit.length,
   };
 }

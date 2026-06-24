@@ -13,6 +13,7 @@ const checks = [
   { name: 'targeted web metrics endpoint test', cmd: 'node', args: ['--test', '--import', 'tsx', 'packages/cli/test/web-server-metrics.test.ts'] },
   { name: 'targeted web events endpoint test', cmd: 'node', args: ['--test', '--import', 'tsx', 'packages/cli/test/web-server-events.test.ts'] },
   { name: 'targeted web roadmap endpoint test', cmd: 'node', args: ['--test', '--import', 'tsx', 'packages/cli/test/web-server-roadmap.test.ts'] },
+  { name: 'targeted web production endpoint test', cmd: 'node', args: ['--test', '--import', 'tsx', 'packages/cli/test/web-server-production.test.ts'] },
   { name: 'targeted web realtime ui test', cmd: 'node', args: ['--test', '--import', 'tsx', 'packages/cli/test/web-ui-events.test.ts'] },
   { name: 'targeted web roadmap ui test', cmd: 'node', args: ['--test', '--import', 'tsx', 'packages/cli/test/web-ui-roadmap.test.ts'] },
   { name: 'prepublish gate CLI', cmd: 'npm', args: ['run', 'cli', 'prepublish-gate'] },
@@ -30,6 +31,7 @@ for (const path of [
   'packages/cli/test/web-server-metrics.test.ts',
   'packages/cli/test/web-server-events.test.ts',
   'packages/cli/test/web-server-roadmap.test.ts',
+  'packages/cli/test/web-server-production.test.ts',
   'packages/cli/test/web-ui-events.test.ts',
   'packages/cli/test/web-ui-roadmap.test.ts',
 ]) {

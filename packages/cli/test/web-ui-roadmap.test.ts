@@ -18,3 +18,14 @@ void test('web ui: exposes unattended roadmap panel in main navigation', () => {
   assert.match(js, /production/);
   assert.match(js, /loadRoadmap\(\)/);
 });
+
+void test('web ui: exposes dedicated production operations panel in main navigation', () => {
+  const html = readFileSync(resolve(repoRoot, 'apps/web/index.html'), 'utf-8');
+  const js = readFileSync(resolve(repoRoot, 'apps/web/app.js'), 'utf-8');
+
+  assert.match(html, /data-tab="production"/);
+  assert.match(html, /id="production-output"/);
+  assert.match(html, /生产运营中心/);
+  assert.match(js, /fetchJson\('\/api\/production'\)/);
+  assert.match(js, /loadProduction\(\)/);
+});

@@ -8,6 +8,7 @@ const els = {
   statsOutput: document.getElementById('stats-output'),
   metricsOutput: document.getElementById('metrics-output'),
   roadmapOutput: document.getElementById('roadmap-output'),
+  productionOutput: document.getElementById('production-output'),
   bulkStatus: document.getElementById('bulk-status'),
   bulkPause: document.getElementById('bulk-pause'),
   bulkResume: document.getElementById('bulk-resume'),
@@ -36,6 +37,7 @@ const views = {
   stats: document.getElementById('view-stats'),
   metrics: document.getElementById('view-metrics'),
   roadmap: document.getElementById('view-roadmap'),
+  production: document.getElementById('view-production'),
   feedback: document.getElementById('view-feedback'),
   ab: document.getElementById('view-ab'),
 };
@@ -212,6 +214,18 @@ async function loadRoadmap() {
   }, null, 2);
 }
 
+async function loadProduction() {
+  const data = await fetchJson('/api/production');
+  els.productionOutput.textContent = JSON.stringify({
+    replyQueue: data.replyQueue,
+    tokenLedger: data.tokenLedger,
+    audit: data.audit,
+    channel: data.channel,
+    release: data.release,
+    budget: data.budget,
+  }, null, 2);
+}
+
 const bulkEndpoints = {
   pause: '/api/bulk/pause',
   resume: '/api/bulk/resume',
@@ -279,7 +293,7 @@ els.queueWork.addEventListener('click', async () => {
 });
 
 async function refreshRealtimePanels() {
-  await Promise.all([loadContents(), loadQueue(), loadStats(), loadMetrics(), loadRoadmap()]);
+  await Promise.all([loadContents(), loadQueue(), loadStats(), loadMetrics(), loadRoadmap(), loadProduction()]);
 }
 
 function connectRealtimeEvents() {
@@ -321,6 +335,7 @@ async function main() {
     await loadStats();
     await loadMetrics();
     await loadRoadmap();
+    await loadProduction();
   } catch (e) {
     console.error(e);
   }

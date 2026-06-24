@@ -23,6 +23,7 @@
         <button data-tab="stats" class="tab">统计</button>
         <button data-tab="metrics" class="tab">Metrics</button>
         <button data-tab="roadmap" class="tab">路线图</button>
+        <button data-tab="production" class="tab">生产运营</button>
         <button data-tab="feedback" class="tab">反馈</button>
         <button data-tab="ab" class="tab">A/B 报告</button>
       </nav>
@@ -74,6 +75,11 @@
       <h2>无人值守路线图 · 生产控制台</h2>
       <p class="hint">展示回复安全、预算熔断、A/B 决策、Channel 安全链、release gate 和审计摘要。</p>
       <pre id="roadmap-output" class="pre"></pre>
+    </section>
+    <section id="view-production" class="view">
+      <h2>生产运营中心</h2>
+      <p class="hint">读取持久 audit / token ledger / release action，用于上线前运营验收。</p>
+      <pre id="production-output" class="pre"></pre>
     </section>
     <section id="view-feedback" class="view">
       <h2>反馈窗口</h2>
