@@ -20,6 +20,15 @@ import {
   buildStructuredRunbook,
   compactDeliveryHistoryLedger,
   buildReleaseLocalHardeningPlan,
+  buildProductionExecutionReadiness,
+  buildRealConnectorExecutionPlan,
+  buildPersistentApprovalStore,
+  buildCredentialHealthCenter,
+  buildCiArtifactIngestExecution,
+  buildReplayScenarioLibrary,
+  buildReleaseOpsEventTimeline,
+  buildSafeExecutePlan,
+  buildWebModeEnhancementDirections,
   recommendNextIterations,
   createCredentialProbe,
   createPlatformAdapters,
@@ -82,6 +91,28 @@ function buildDeliveryOpsPayload(proposalId: string): Record<string, unknown> {
   const checklist: FailureChecklistItem[] = [];
   const webActions = buildWebActionManifest(evidence, safeForward);
   const history = buildDeliveryHistorySnapshot([evidence]);
+  const executionReadiness = buildProductionExecutionReadiness({
+    connectors: [
+      { platform: 'x', credentialPresent: false, healthOk: false, dryRunOk: true, realPostEnabled: false, retryableErrors: ['rate_limit'] },
+      { platform: 'reddit', credentialPresent: false, healthOk: false, dryRunOk: true, realPostEnabled: false, retryableErrors: ['timeout'] },
+    ],
+    actions: [
+      { id: 'approve-real-post', kind: 'real-post', label: 'Approve real platform post', risk: 'high', command: 'npm run cli publish-cli --real' },
+      { id: 'approve-mcp-forward', kind: 'mcp-forward', label: 'Approve MCP status forward', risk: 'medium', command: buildSafeForwardCommandPlan(proposalId, safeForward).commands.join(' && ') },
+      { id: 'copy-runbook', kind: 'runbook-command', label: 'Copy structured runbook', risk: 'low', command: 'copy structuredRunbook.copyMarkdown' },
+    ],
+    runs: [{ id: 'cli-snapshot', ok: evidence.ok, durationMs: 0, failedGates: evidence.failedGates, platformErrors: {}, at: new Date(0).toISOString() }],
+    rootDir: '.ima/release-ops',
+    topic: 'cli production replay sandbox',
+  });
+  const approvalStore = buildPersistentApprovalStore(executionReadiness.approvalQueue, { rootDir: '.ima/release-ops', now: new Date(0).toISOString() });
+  const credentialHealthCenter = buildCredentialHealthCenter(executionReadiness.credentialRotation);
+  const ciArtifactIngest = buildCiArtifactIngestExecution({ runId: 'latest', conclusion: 'success', artifactPath: '.ima/release-ops/ci/release-evidence.json', artifactFound: true });
+  const eventTimeline = buildReleaseOpsEventTimeline([
+    { at: new Date(0).toISOString(), kind: 'delivery', label: evidence.summary, ok: evidence.ok },
+    { at: new Date(0).toISOString(), kind: 'approval', label: `${approvalStore.rows.length} approval rows`, ok: !executionReadiness.approvalQueue.requiresOperator },
+    { at: new Date(0).toISOString(), kind: 'credential', label: `${credentialHealthCenter.cards.length} credentials checked`, ok: credentialHealthCenter.ok },
+  ]);
   return {
     release,
     evidence,
@@ -102,6 +133,15 @@ function buildDeliveryOpsPayload(proposalId: string): Record<string, unknown> {
     }),
     compactedHistory: compactDeliveryHistoryLedger([evidence], 20),
     releaseLocalHardening: buildReleaseLocalHardeningPlan(process.cwd()),
+    executionReadiness,
+    connectorExecution: buildRealConnectorExecutionPlan({ platform: 'x', contentId: 'cli-snapshot' }),
+    approvalStore,
+    credentialHealthCenter,
+    ciArtifactIngest,
+    replayScenarios: buildReplayScenarioLibrary(['x', 'reddit']),
+    eventTimeline,
+    safeExecutePreview: buildSafeExecutePlan(approvalStore.rows, { actionId: 'copy-runbook', approvalToken: 'APPROVED copy-runbook' }),
+    webModeEnhancements: buildWebModeEnhancementDirections(),
     deliveryMarkdown: buildDeliveryMarkdown(evidence, safeForward),
     failureChecklist: checklist,
   };
@@ -435,6 +475,16 @@ export async function runCli(argv: string[]): Promise<void> {
     return;
   }
 
+  if (cmd === 'safe-execute') {
+    const actionId = argv[1];
+    if (!actionId) throw new Error('usage: ima safe-execute <action-id> --approval APPROVED <action-id>');
+    const approvalToken = valueAfterFlag(argv, '--approval');
+    const delivery = buildDeliveryOpsPayload('P-20260624-013');
+    const store = delivery.approvalStore as ReturnType<typeof buildPersistentApprovalStore>;
+    console.log(JSON.stringify(buildSafeExecutePlan(store.rows, { actionId, approvalToken }), null, 2));
+    return;
+  }
+
   if (cmd === 'production') {
     const tokenPath = join(app.store.root, 'token-ledger.jsonl');
     const tokenEntries = existsSync(tokenPath) ? parseTokenLedgerJsonl(readFileSync(tokenPath, 'utf-8')) : [];
@@ -744,6 +794,7 @@ Usage:
   ima dry-run <id>                      Preview adapted posts per platform (no channel calls)
   ima reply send --sandbox              Execute sandbox reply plan and append audit.jsonl
   ima production                        Print production console snapshot JSON
+  ima safe-execute <action-id> --approval <token>  Execute only persisted approved actions
   ima release-local-json                Print machine-readable release gate report
   ima bootstrap-real [--write-back-to-feedback]  Re-run the bootstrap demo (optionally close the feedback loop)
   ima doctor                            Check crawler + channel + engagement + LLM + feedback health

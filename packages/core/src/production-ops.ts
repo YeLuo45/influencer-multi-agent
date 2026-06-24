@@ -263,6 +263,179 @@ export function buildProductionExecutionReadiness(input: {
   };
 }
 
+export interface ConnectorExecutionStep {
+  kind: 'prepare' | 'dryRun' | 'approval' | 'execute' | 'verify' | 'rollback';
+  command: string;
+  willExecute: boolean;
+}
+
+export interface ConnectorExecutionPlan {
+  mode: 'dry-run' | 'execute';
+  executable: boolean;
+  confirmationRequired: string;
+  steps: ConnectorExecutionStep[];
+}
+
+export function buildRealConnectorExecutionPlan(input: { platform: PlatformId; contentId: string; approvalText?: string }): ConnectorExecutionPlan {
+  const confirmationRequired = `EXECUTE ${input.platform} ${input.contentId}`;
+  const executable = input.approvalText === confirmationRequired;
+  const mode = executable ? 'execute' as const : 'dry-run' as const;
+  const commands: Array<[ConnectorExecutionStep['kind'], string]> = [
+    ['prepare', `npm run cli status ${input.contentId}`],
+    ['dryRun', `npm run cli dry-run ${input.contentId} --json --platforms ${input.platform}`],
+    ['approval', `require ${confirmationRequired}`],
+    ['execute', `npm run cli publish-cli --real ${input.platform} ${input.contentId}`],
+    ['verify', `npm run cli channel-test ${input.platform}`],
+    ['rollback', `npm run cli cleanup ${input.platform} <post-id> --sandbox`],
+  ];
+  return { mode, executable, confirmationRequired, steps: commands.map(([kind, command]) => ({ kind, command, willExecute: executable && kind !== 'approval' })) };
+}
+
+export interface ApprovalStoreRow {
+  id: string;
+  kind: ProductionApprovalKind;
+  status: 'pending' | 'approved' | 'rejected' | 'executed';
+  command: string;
+  approvalToken: string;
+  risk: ProductionRisk;
+  at: string;
+}
+
+export interface PersistentApprovalStore {
+  path: string;
+  rows: ApprovalStoreRow[];
+  appendPreview: string;
+}
+
+export function buildPersistentApprovalStore(queue: ProductionApprovalQueue, opts: { rootDir: string; now: string }): PersistentApprovalStore {
+  const rootDir = opts.rootDir.replace(/\/$/, '');
+  const rows = queue.items.map((item) => ({
+    id: item.id,
+    kind: item.kind,
+    status: item.status === 'informational' ? 'approved' as const : 'pending' as const,
+    command: item.command,
+    approvalToken: `APPROVED ${item.id}`,
+    risk: item.risk,
+    at: opts.now,
+  }));
+  return { path: `${rootDir}/approvals.jsonl`, rows, appendPreview: rows.map((row) => JSON.stringify(row)).join('\n') + (rows.length > 0 ? '\n' : '') };
+}
+
+export interface CredentialHealthCard {
+  platform: PlatformId;
+  visible: string;
+  severity: 'ok' | 'warning' | 'critical';
+  note: string;
+}
+
+export interface CredentialHealthCenter {
+  ok: boolean;
+  cards: CredentialHealthCard[];
+}
+
+export function buildCredentialHealthCenter(plan: CredentialRotationPlan): CredentialHealthCenter {
+  const cards = plan.items.map((item) => ({
+    platform: item.platform,
+    visible: item.masked,
+    severity: credentialSeverity(item.status),
+    note: item.note,
+  }));
+  return { ok: cards.every((card) => card.severity === 'ok'), cards };
+}
+
+export interface CiArtifactIngestExecution {
+  ok: boolean;
+  mutatesRepo: false;
+  summary: string;
+  gates: Array<{ name: string; ok: boolean; summary: string; command: string }>;
+}
+
+export function buildCiArtifactIngestExecution(input: { runId: string; conclusion: string; artifactPath: string; artifactFound: boolean }): CiArtifactIngestExecution {
+  const ok = input.conclusion === 'success' && input.artifactFound;
+  const summary = `run ${input.runId}: conclusion=${input.conclusion}; artifact=${input.artifactFound ? 'found' : 'missing'} at ${input.artifactPath}`;
+  return { ok, mutatesRepo: false, summary, gates: [{ name: `github-actions/run-${input.runId}`, ok, summary: `conclusion=${input.conclusion}; artifact=${input.artifactFound ? 'found' : 'missing'}`, command: `gh run view ${input.runId}` }] };
+}
+
+export interface ReplayScenario {
+  id: string;
+  title: string;
+  command: string;
+  sideEffects: false;
+}
+
+export interface ReplayScenarioLibrary {
+  scenarios: ReplayScenario[];
+}
+
+export function buildReplayScenarioLibrary(platforms: PlatformId[]): ReplayScenarioLibrary {
+  const joined = platforms.join(',');
+  return {
+    scenarios: [
+      { id: 'viral-trend', title: 'Viral trend dry-run', command: `npm run cli dry-run <content-id> --json --platforms ${joined}`, sideEffects: false },
+      { id: 'long-form-distribution', title: 'Long-form cross-post replay', command: `npm run cli dry-run <long-content-id> --json --platforms ${joined}`, sideEffects: false },
+      { id: 'reply-loop', title: 'Reply queue replay', command: 'npm run cli reply send --sandbox', sideEffects: false },
+      { id: 'ab-budget-failure', title: 'A/B budget breaker replay', command: 'npm run cli production --simulate-budget-failure', sideEffects: false },
+      { id: 'platform-retry', title: 'Platform retry replay', command: `npm run cli publish-test --sandbox ${joined}`, sideEffects: false },
+    ],
+  };
+}
+
+export interface ReleaseOpsTimelineEvent {
+  at: string;
+  kind: 'delivery' | 'approval' | 'ci' | 'push' | 'mcp' | 'credential';
+  label: string;
+  ok: boolean;
+}
+
+export interface ReleaseOpsEventTimeline {
+  events: ReleaseOpsTimelineEvent[];
+  failures: number;
+  copyMarkdown: string;
+}
+
+export function buildReleaseOpsEventTimeline(events: ReleaseOpsTimelineEvent[]): ReleaseOpsEventTimeline {
+  const sorted = [...events].sort((a, b) => a.at.localeCompare(b.at) || a.kind.localeCompare(b.kind));
+  const copyMarkdown = ['# Release Ops Timeline', '', ...sorted.map((event) => `- ${event.at} [${event.kind}] ${event.ok ? 'ok' : 'blocked'} — ${event.label}`), ''].join('\n');
+  return { events: sorted, failures: sorted.filter((event) => !event.ok).length, copyMarkdown };
+}
+
+export interface SafeExecutePlan {
+  mode: 'dry-run' | 'execute';
+  executable: boolean;
+  command: string;
+  reason: string;
+}
+
+export function buildSafeExecutePlan(rows: ApprovalStoreRow[], input: { actionId: string; approvalToken?: string }): SafeExecutePlan {
+  const row = rows.find((item) => item.id === input.actionId);
+  if (!row) return { mode: 'dry-run', executable: false, command: '', reason: `missing action ${input.actionId}` };
+  const executable = row.status === 'approved' && input.approvalToken === row.approvalToken;
+  return { mode: executable ? 'execute' : 'dry-run', executable, command: row.command, reason: executable ? 'approval matched' : `requires ${row.approvalToken}` };
+}
+
+export interface WebModeEnhancementDirection {
+  id: string;
+  title: string;
+  area: 'web-mode';
+  roi: number;
+}
+
+export function buildWebModeEnhancementDirections(): WebModeEnhancementDirection[] {
+  return [
+    { id: 'guided-command-palette', title: 'Guided Web command palette for safe ops', area: 'web-mode', roi: 100 },
+    { id: 'approval-diff-preview', title: 'Approval diff preview before execute', area: 'web-mode', roi: 95 },
+    { id: 'credential-setup-wizard', title: 'Credential setup wizard with masked validation', area: 'web-mode', roi: 90 },
+    { id: 'timeline-filter-search', title: 'Timeline filter, search, and drill-down', area: 'web-mode', roi: 82 },
+    { id: 'scenario-replay-builder', title: 'Visual replay scenario builder', area: 'web-mode', roi: 78 },
+  ];
+}
+
+function credentialSeverity(status: CredentialRotationItem['status']): CredentialHealthCard['severity'] {
+  if (status === 'missing') return 'critical';
+  if (status === 'rotate_soon' || status === 'scope_review') return 'warning';
+  return 'ok';
+}
+
 function connectorStatus(connector: PlatformConnectorInput): PlatformConnectorReadiness['status'] {
   if (!connector.credentialPresent) return 'missing_credential';
   if (!connector.healthOk) return 'health_failed';

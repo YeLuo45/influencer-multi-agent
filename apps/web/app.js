@@ -242,6 +242,9 @@ async function loadProduction() {
       · <strong>Safe mode:</strong> ${data.safeForwardExecution?.mode ?? data.safeForwardCommand?.mode ?? 'dry-run'}
       · <strong>Approval:</strong> ${readiness.approvalQueue?.items?.length ?? 0} queued
       · <strong>Replay:</strong> ${readiness.replaySandbox?.sideEffects === false ? 'dry-run only' : 'unknown'}
+      · <strong>Timeline:</strong> ${data.eventTimeline?.events?.length ?? 0} events
+      · <strong>Credential:</strong> ${data.credentialHealthCenter?.ok ? 'ok' : 'needs attention'}
+      · <strong>Next Web:</strong> ${data.webModeEnhancements?.[0]?.id ?? '-'}
     </div>
   `;
   els.productionActions.querySelectorAll('.production-action').forEach((button) => {
@@ -258,6 +261,14 @@ async function loadProduction() {
   els.productionOutput.textContent = JSON.stringify({
     releaseOpsDashboard: data.releaseOpsDashboard,
     executionReadiness: data.executionReadiness,
+    connectorExecution: data.connectorExecution,
+    approvalStore: data.approvalStore,
+    credentialHealthCenter: data.credentialHealthCenter,
+    ciArtifactIngest: data.ciArtifactIngest,
+    replayScenarios: data.replayScenarios,
+    eventTimeline: data.eventTimeline,
+    safeExecutePreview: data.safeExecutePreview,
+    webModeEnhancements: data.webModeEnhancements,
     safeForwardExecution: data.safeForwardExecution,
     structuredRunbook: data.structuredRunbook,
     releaseLocalHardening: data.releaseLocalHardening,

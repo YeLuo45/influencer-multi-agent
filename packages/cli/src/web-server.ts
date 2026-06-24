@@ -38,6 +38,14 @@ import {
   compactDeliveryHistoryLedger,
   buildReleaseLocalHardeningPlan,
   buildProductionExecutionReadiness,
+  buildRealConnectorExecutionPlan,
+  buildPersistentApprovalStore,
+  buildCredentialHealthCenter,
+  buildCiArtifactIngestExecution,
+  buildReplayScenarioLibrary,
+  buildReleaseOpsEventTimeline,
+  buildSafeExecutePlan,
+  buildWebModeEnhancementDirections,
   recommendNextIterations,
   createPlatformAdapters,
   createStubChannelAdapter,
@@ -298,6 +306,19 @@ async function apiProduction(res: ServerResponse, ctx: HandleCtx): Promise<void>
     rootDir: '.ima/release-ops',
     topic: 'production replay sandbox',
   });
+  const approvalStore = buildPersistentApprovalStore(executionReadiness.approvalQueue, { rootDir: '.ima/release-ops', now: ctx.now() });
+  const connectorExecution = buildRealConnectorExecutionPlan({ platform: 'x', contentId: 'local-web-snapshot' });
+  const credentialHealthCenter = buildCredentialHealthCenter(executionReadiness.credentialRotation);
+  const ciArtifactIngest = buildCiArtifactIngestExecution({ runId: 'latest', conclusion: 'success', artifactPath: '.ima/release-ops/ci/release-evidence.json', artifactFound: true });
+  const replayScenarios = buildReplayScenarioLibrary(['x', 'reddit']);
+  const eventTimeline = buildReleaseOpsEventTimeline([
+    { at: ctx.now(), kind: 'delivery', label: evidence.summary, ok: evidence.ok },
+    { at: ctx.now(), kind: 'approval', label: `${approvalStore.rows.length} approval rows`, ok: !executionReadiness.approvalQueue.requiresOperator },
+    { at: ctx.now(), kind: 'credential', label: `${credentialHealthCenter.cards.length} credentials checked`, ok: credentialHealthCenter.ok },
+    { at: ctx.now(), kind: 'ci', label: ciArtifactIngest.summary, ok: ciArtifactIngest.ok },
+  ]);
+  const safeExecutePreview = buildSafeExecutePlan(approvalStore.rows, { actionId: 'copy-runbook', approvalToken: 'APPROVED copy-runbook' });
+  const webModeEnhancements = buildWebModeEnhancementDirections();
   const snapshot = buildProductionConsoleSnapshot({
     replies: executeReplyQueue([], { sandbox: true, now: ctx.now(), actor: 'web' }),
     budget,
@@ -308,7 +329,7 @@ async function apiProduction(res: ServerResponse, ctx: HandleCtx): Promise<void>
     tokenLedger: { totalCalls: tokenEntries.length, totalCostUsd: tokenEntries.reduce((sum, entry) => sum + entry.costUsd, 0) },
     replyQueue: buildReplyQueueState([]),
   });
-  sendJson(res, { ...snapshot, evidence, safeForward, failureChecklist: checklist, deliveryMarkdown: buildDeliveryMarkdown(evidence, safeForward), history, safeForwardCommand, safeForwardExecution, runbook, structuredRunbook, recommendations, webActions, releaseOpsDashboard, compactedHistory, releaseLocalHardening, executionReadiness });
+  sendJson(res, { ...snapshot, evidence, safeForward, failureChecklist: checklist, deliveryMarkdown: buildDeliveryMarkdown(evidence, safeForward), history, safeForwardCommand, safeForwardExecution, runbook, structuredRunbook, recommendations, webActions, releaseOpsDashboard, compactedHistory, releaseLocalHardening, executionReadiness, connectorExecution, approvalStore, credentialHealthCenter, ciArtifactIngest, replayScenarios, eventTimeline, safeExecutePreview, webModeEnhancements });
 }
 
 async function apiRoadmap(res: ServerResponse, _ctx: HandleCtx): Promise<void> {

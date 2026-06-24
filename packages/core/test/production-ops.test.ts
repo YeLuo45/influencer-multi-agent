@@ -9,6 +9,14 @@ import {
   buildPlatformConnectorHardeningMatrix,
   buildProductionExecutionReadiness,
   buildProductionReplaySandbox,
+  buildRealConnectorExecutionPlan,
+  buildPersistentApprovalStore,
+  buildCredentialHealthCenter,
+  buildCiArtifactIngestExecution,
+  buildReplayScenarioLibrary,
+  buildReleaseOpsEventTimeline,
+  buildSafeExecutePlan,
+  buildWebModeEnhancementDirections,
   type PlatformConnectorInput,
   type ProductionApprovalAction,
   type ProductionRunRecord,
@@ -104,4 +112,77 @@ void test('buildProductionExecutionReadiness combines all seven next-iteration d
   assert.equal(readiness.replaySandbox.sideEffects, false);
   assert.equal(readiness.analytics.successRate, 0.67);
   assert.ok(readiness.nextActions.includes('Resolve blocked platform connectors'));
+});
+
+void test('buildRealConnectorExecutionPlan models prepare to rollback and stays dry-run without approval', () => {
+  const plan = buildRealConnectorExecutionPlan({ platform: 'x', contentId: 'c1', approvalText: 'APPROVE wrong' });
+  assert.equal(plan.mode, 'dry-run');
+  assert.equal(plan.executable, false);
+  assert.deepEqual(plan.steps.map((step) => step.kind), ['prepare', 'dryRun', 'approval', 'execute', 'verify', 'rollback']);
+  assert.equal(plan.steps.find((step) => step.kind === 'execute')?.willExecute, false);
+  const approved = buildRealConnectorExecutionPlan({ platform: 'x', contentId: 'c1', approvalText: 'EXECUTE x c1' });
+  assert.equal(approved.mode, 'execute');
+  assert.equal(approved.steps.find((step) => step.kind === 'execute')?.willExecute, true);
+});
+
+void test('buildPersistentApprovalStore turns approval items into append-only rows', () => {
+  const queue = buildApprovalQueue(actions);
+  const store = buildPersistentApprovalStore(queue, { rootDir: '.ima/release-ops', now: '2026-06-24T03:00:00.000Z' });
+  assert.equal(store.path, '.ima/release-ops/approvals.jsonl');
+  assert.equal(store.rows.length, 3);
+  assert.deepEqual(store.rows.map((row) => row.status), ['pending', 'pending', 'approved']);
+  assert.match(store.appendPreview, /post-x-1/);
+});
+
+void test('buildCredentialHealthCenter exposes masked health cards for the web', () => {
+  const center = buildCredentialHealthCenter(buildCredentialRotationPlan([
+    { platform: 'x', envKey: 'IMA_X_TOKEN', present: true, expiresInDays: 30, scopes: ['post:write'] },
+    { platform: 'reddit', envKey: 'IMA_REDDIT_TOKEN', present: false, expiresInDays: null, scopes: [] },
+  ]));
+  assert.equal(center.ok, false);
+  assert.deepEqual(center.cards.map((card) => [card.platform, card.visible, card.severity]), [['x', 'IMA_X_TOKEN=***', 'ok'], ['reddit', 'IMA_REDDIT_TOKEN=***', 'critical']]);
+});
+
+void test('buildCiArtifactIngestExecution parses artifact presence into evidence summary', () => {
+  const ingest = buildCiArtifactIngestExecution({ runId: '42', conclusion: 'success', artifactPath: '.ima/release-ops/ci/evidence.json', artifactFound: true });
+  assert.equal(ingest.ok, true);
+  assert.equal(ingest.mutatesRepo, false);
+  assert.match(ingest.summary, /run 42/);
+  assert.deepEqual(ingest.gates, [{ name: 'github-actions/run-42', ok: true, summary: 'conclusion=success; artifact=found', command: 'gh run view 42' }]);
+});
+
+void test('buildReplayScenarioLibrary provides copy-ready web scenarios', () => {
+  const library = buildReplayScenarioLibrary(['x', 'reddit']);
+  assert.deepEqual(library.scenarios.map((scenario) => scenario.id), ['viral-trend', 'long-form-distribution', 'reply-loop', 'ab-budget-failure', 'platform-retry']);
+  assert.equal(library.scenarios.every((scenario) => scenario.sideEffects === false), true);
+  assert.match(library.scenarios[0]?.command ?? '', /dry-run/);
+});
+
+void test('buildReleaseOpsEventTimeline sorts mixed release events for one-screen web review', () => {
+  const timeline = buildReleaseOpsEventTimeline([
+    { at: '2026-06-24T03:00:00.000Z', kind: 'push', label: 'push ok', ok: true },
+    { at: '2026-06-24T02:00:00.000Z', kind: 'approval', label: 'approval pending', ok: false },
+  ]);
+  assert.deepEqual(timeline.events.map((event) => event.kind), ['approval', 'push']);
+  assert.equal(timeline.failures, 1);
+  assert.match(timeline.copyMarkdown, /approval pending/);
+});
+
+void test('buildSafeExecutePlan only executes persisted approved actions with exact token', () => {
+  const queue = buildApprovalQueue(actions);
+  const store = buildPersistentApprovalStore(queue, { rootDir: '.ima/release-ops', now: '2026-06-24T03:00:00.000Z' });
+  const dry = buildSafeExecutePlan(store.rows, { actionId: 'post-x-1', approvalToken: 'wrong' });
+  assert.equal(dry.mode, 'dry-run');
+  assert.equal(dry.executable, false);
+  const approved = buildSafeExecutePlan(store.rows, { actionId: 'copy-runbook-1', approvalToken: 'APPROVED copy-runbook-1' });
+  assert.equal(approved.mode, 'execute');
+  assert.equal(approved.executable, true);
+  assert.match(approved.command, /cat docs\/runbook.md/);
+});
+
+void test('buildWebModeEnhancementDirections returns the next web-focused iteration set', () => {
+  const directions = buildWebModeEnhancementDirections();
+  assert.equal(directions[0]?.id, 'guided-command-palette');
+  assert.ok(directions.some((direction) => direction.id === 'approval-diff-preview'));
+  assert.ok(directions.every((direction) => direction.area === 'web-mode'));
 });

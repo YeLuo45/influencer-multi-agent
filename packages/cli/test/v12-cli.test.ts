@@ -88,14 +88,26 @@ void test('cli: production and release-local-json print machine-readable JSON', 
   try {
     const production = runCli(['production'], root);
     assert.equal(production.status, 0);
-    const snapshot = JSON.parse(production.stdout) as { replySafety: { readyForRealReply: boolean }; release: { ok: boolean }; history: { total: number }; recommendations: Array<{ id: string }>; runbook: string; webActions: { primaryActionId: string } };
+    const snapshot = JSON.parse(production.stdout) as { replySafety: { readyForRealReply: boolean }; release: { ok: boolean }; history: { total: number }; recommendations: Array<{ id: string }>; runbook: string; webActions: { primaryActionId: string }; executionReadiness: { status: string }; approvalStore: { rows: unknown[] }; credentialHealthCenter: { ok: boolean }; replayScenarios: { scenarios: unknown[] }; eventTimeline: { events: unknown[] }; webModeEnhancements: Array<{ id: string }> };
     assert.equal(snapshot.replySafety.readyForRealReply, false);
     assert.equal(snapshot.release.ok, true);
     assert.equal(snapshot.history.total, 1);
     assert.ok(snapshot.recommendations.length >= 1);
     assert.match(snapshot.runbook, /Production Runbook/);
     assert.equal(snapshot.webActions.primaryActionId, 'copy-mcp-commands');
+    assert.equal(snapshot.executionReadiness.status, 'blocked');
+    assert.equal(snapshot.approvalStore.rows.length, 3);
+    assert.equal(snapshot.credentialHealthCenter.ok, false);
+    assert.equal(snapshot.replayScenarios.scenarios.length, 5);
+    assert.equal(snapshot.eventTimeline.events.length >= 3, true);
+    assert.equal(snapshot.webModeEnhancements[0]?.id, 'guided-command-palette');
 
+    const safeExecute = runCli(['safe-execute', 'copy-runbook', '--approval', 'APPROVED copy-runbook'], root);
+    assert.equal(safeExecute.status, 0);
+    const safePlan = JSON.parse(safeExecute.stdout) as { mode: string; executable: boolean; command: string };
+    assert.equal(safePlan.mode, 'execute');
+    assert.equal(safePlan.executable, true);
+    assert.match(safePlan.command, /copy structuredRunbook/);
     const safeForward = runCli(['delivery', 'safe-forward', '--proposal', 'P-20260624-013'], root);
     assert.equal(safeForward.status, 0);
     assert.match(safeForward.stdout, /mode=dry-run/);

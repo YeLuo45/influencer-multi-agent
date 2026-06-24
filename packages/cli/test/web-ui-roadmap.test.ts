@@ -33,6 +33,10 @@ void test('web ui: exposes dedicated production operations panel in main navigat
   assert.match(js, /executionReadiness/);
   assert.match(js, /connectorMatrix/);
   assert.match(js, /approvalQueue/);
+  assert.match(js, /credentialHealthCenter/);
+  assert.match(js, /eventTimeline/);
+  assert.match(js, /webModeEnhancements/);
+  assert.match(js, /connectorExecution/);
   assert.match(js, /replaySandbox/);
   assert.match(js, /production-action/);
   assert.match(js, /loadProduction\(\)/);
