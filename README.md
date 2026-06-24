@@ -2,6 +2,28 @@
 
 多智能体跨平台大 V 全自动运营交付系统：根据网上热点生成内容并跨平台发布。
 
+## v6 新增（Release Ops Full Automation Batch）
+
+| 方向 | 实现 |
+|---|---|
+| **Release Ops Dashboard v2** | `buildReleaseOpsDashboard()` 汇总 evidence、failed queue、history、CI、push recovery |
+| **Safe Forward Executor** | `buildSafeForwardExecutionPlan()` 输出 dry-run/execute 逐步状态推进计划和 audit trail |
+| **History Ledger Compaction** | `compactDeliveryHistoryLedger()` 保留最新记录并归档旧失败趋势 |
+| **CI Evidence Auto-Ingest** | CI gates 进入 release ops dashboard 的 pass/fail 汇总 |
+| **Structured Runbook** | `buildStructuredRunbook()` 输出 precondition、command、MCP forward 步骤 |
+| **Web Action UI** | 生产运营页新增可见 action buttons，支持复制 runbook/MCP commands/download markdown |
+| **Release Local Hardening** | `buildReleaseLocalHardeningPlan()` 提供隔离 storage root 和非递归 README verifier 命令链 |
+
+## v4.7 新增（Push Recovery + Executable Delivery Actions）
+
+| 方向 | 实现 |
+|---|---|
+| **Push recovery watchdog** | `buildPushRecoveryPlan()` 比较 local/remote commit，生成 `git push origin master` 恢复命令 |
+| **Safe-forward execute confirmation** | `buildSafeForwardCommandPlan()` 只有精确 `EXECUTE P-...` 才进入 execute mode，默认 dry-run |
+| **Delivery history JSONL** | `buildDeliveryHistoryJsonl()` / `parseDeliveryHistoryJsonl()` 支持 `.ima/delivery-history.jsonl` 持久账本 |
+| **Web action manifest** | `buildWebActionManifest()` 暴露 copy runbook / copy MCP commands / download markdown 三个动作 |
+| **CI run import** | `parseCiRunSummary()` 将 GitHub Actions job conclusion 转成 delivery gates，并可通过 `ingestCiEvidence()` 合并 |
+
 ## v4.2 新增（Delivery Automation Full Loop）
 
 | 方向 | 实现 |

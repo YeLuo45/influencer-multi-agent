@@ -24,8 +24,12 @@ void test('web ui: exposes dedicated production operations panel in main navigat
   const js = readFileSync(resolve(repoRoot, 'apps/web/app.js'), 'utf-8');
 
   assert.match(html, /data-tab="production"/);
+  assert.match(html, /id="production-actions"/);
   assert.match(html, /id="production-output"/);
   assert.match(html, /生产运营中心/);
   assert.match(js, /fetchJson\('\/api\/production'\)/);
+  assert.match(js, /releaseOpsDashboard/);
+  assert.match(js, /safeForwardExecution/);
+  assert.match(js, /production-action/);
   assert.match(js, /loadProduction\(\)/);
 });

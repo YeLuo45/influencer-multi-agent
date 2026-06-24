@@ -8,6 +8,7 @@ const els = {
   statsOutput: document.getElementById('stats-output'),
   metricsOutput: document.getElementById('metrics-output'),
   roadmapOutput: document.getElementById('roadmap-output'),
+  productionActions: document.getElementById('production-actions'),
   productionOutput: document.getElementById('production-output'),
   bulkStatus: document.getElementById('bulk-status'),
   bulkPause: document.getElementById('bulk-pause'),
@@ -216,7 +217,45 @@ async function loadRoadmap() {
 
 async function loadProduction() {
   const data = await fetchJson('/api/production');
+  const dashboard = data.releaseOpsDashboard ?? {};
+  const actions = data.webActions?.actions ?? [];
+  els.productionActions.innerHTML = `
+    <div class="ops-summary">
+      ${badge(`release=${dashboard.status ?? 'unknown'}`, dashboard.status === 'ready' ? 'posted' : 'failed_retry')}
+      ${badge(`primary=${data.webActions?.primaryActionId ?? '-'}`, 'pending')}
+      ${badge(`history=${data.history?.total ?? 0}`, 'done')}
+      ${badge(`push=${dashboard.push?.status ?? '-'}`, dashboard.push?.needsPush ? 'failed_retry' : 'posted')}
+    </div>
+    <div class="action-grid">
+      ${actions.map((action) => `
+        <button class="btn-secondary production-action" data-action-id="${escapeHtml(action.id)}" data-payload="${escapeHtml(action.payload)}">
+          ${escapeHtml(action.label)}
+        </button>
+      `).join('')}
+    </div>
+    <div class="ops-detail">
+      <strong>Failed queue:</strong> ${(dashboard.failedQueue ?? []).map((item) => escapeHtml(item.gate)).join(', ') || 'none'}
+      · <strong>CI:</strong> ${dashboard.ci?.passed ?? 0}/${dashboard.ci?.total ?? 0}
+      · <strong>Safe mode:</strong> ${data.safeForwardExecution?.mode ?? data.safeForwardCommand?.mode ?? 'dry-run'}
+    </div>
+  `;
+  els.productionActions.querySelectorAll('.production-action').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const payload = button.dataset.payload ?? '';
+      try {
+        await navigator.clipboard.writeText(payload);
+        button.textContent = 'Copied';
+      } catch {
+        els.productionOutput.textContent = payload;
+      }
+    });
+  });
   els.productionOutput.textContent = JSON.stringify({
+    releaseOpsDashboard: data.releaseOpsDashboard,
+    safeForwardExecution: data.safeForwardExecution,
+    structuredRunbook: data.structuredRunbook,
+    releaseLocalHardening: data.releaseLocalHardening,
+    compactedHistory: data.compactedHistory,
     replyQueue: data.replyQueue,
     tokenLedger: data.tokenLedger,
     audit: data.audit,
@@ -230,6 +269,7 @@ async function loadProduction() {
     safeForwardCommand: data.safeForwardCommand,
     runbook: data.runbook,
     recommendations: data.recommendations,
+    webActions: data.webActions,
     budget: data.budget,
   }, null, 2);
 }

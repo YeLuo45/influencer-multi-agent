@@ -212,3 +212,179 @@ export function recommendNextIterations(input: { evidence: AcceptanceEvidence; o
   recs.push({ id: 'history-ledger-compaction', title: 'Compact delivery history ledger', score: 40, reason: 'keep long-running unattended evidence cheap to read' });
   return recs.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
 }
+
+export interface PushRecoveryPlan {
+  status: 'synced' | 'ahead' | 'behind' | 'diverged';
+  needsPush: boolean;
+  command: string;
+  note: string;
+}
+
+export function buildPushRecoveryPlan(input: { local: string; remote: string; branch?: string; remoteName?: string }): PushRecoveryPlan {
+  const branch = input.branch ?? 'master';
+  const remoteName = input.remoteName ?? 'origin';
+  if (input.local === input.remote) return { status: 'synced', needsPush: false, command: `git push ${remoteName} ${branch}`, note: 'local and remote are equal' };
+  if (input.local && input.remote) return { status: 'ahead', needsPush: true, command: `git push ${remoteName} ${branch}`, note: `local ${input.local} differs from remote ${input.remote}` };
+  return { status: input.local ? 'ahead' : 'behind', needsPush: Boolean(input.local), command: `git push ${remoteName} ${branch}`, note: 'one side is missing a commit hash' };
+}
+
+export function buildDeliveryHistoryJsonl(existing: string, items: AcceptanceEvidence[]): string {
+  const prefix = existing.trim().length > 0 ? `${existing.trim()}\n` : '';
+  const rows = items.map((item) => JSON.stringify(item)).join('\n');
+  return `${prefix}${rows}${rows ? '\n' : ''}`;
+}
+
+export function parseDeliveryHistoryJsonl(jsonl: string): AcceptanceEvidence[] {
+  return jsonl.split('\n').map((line) => line.trim()).filter(Boolean).map((line) => JSON.parse(line) as AcceptanceEvidence);
+}
+
+export interface WebActionManifest {
+  primaryActionId: string;
+  actions: Array<{ id: string; label: string; kind: 'copy' | 'download'; payload: string }>;
+}
+
+export function buildWebActionManifest(evidence: AcceptanceEvidence, plan: SafeForwardPlan): WebActionManifest {
+  const commandPlan = buildSafeForwardCommandPlan(evidence.proposalId, plan);
+  const markdown = buildDeliveryMarkdown(evidence, plan);
+  return {
+    primaryActionId: plan.canAdvance ? 'copy-mcp-commands' : 'copy-runbook',
+    actions: [
+      { id: 'copy-runbook', label: 'Copy runbook', kind: 'copy', payload: `Runbook for ${evidence.proposalId}: ${evidence.summary}` },
+      { id: 'copy-mcp-commands', label: 'Copy MCP commands', kind: 'copy', payload: commandPlan.commands.join('\n') },
+      { id: 'download-delivery-markdown', label: 'Download delivery markdown', kind: 'download', payload: markdown },
+    ],
+  };
+}
+
+export interface CiRunSummaryInput {
+  provider: string;
+  jobs: Array<{ name: string; conclusion: 'success' | 'failure' | 'cancelled' | 'skipped' | string }>;
+}
+
+export function parseCiRunSummary(input: CiRunSummaryInput): DeliveryGateInput[] {
+  return input.jobs.map((job) => ({
+    name: `${input.provider}/${job.name}`,
+    ok: job.conclusion === 'success' || job.conclusion === 'skipped',
+    summary: `conclusion=${job.conclusion}`,
+    command: input.provider === 'github-actions' ? 'gh run view' : `inspect ${input.provider}`,
+  }));
+}
+
+export interface ReleaseOpsDashboard {
+  status: 'ready' | 'blocked';
+  summary: string;
+  failedQueue: FailureChecklistItem[];
+  primaryActionId: string;
+  history: DeliveryHistorySnapshot;
+  ci: { total: number; passed: number; failed: number; failedGates: string[] };
+  push: PushRecoveryPlan;
+}
+
+export function buildReleaseOpsDashboard(input: {
+  evidence: AcceptanceEvidence;
+  plan: SafeForwardPlan;
+  history: DeliveryHistorySnapshot;
+  webActions: WebActionManifest;
+  ciGates?: DeliveryGateInput[];
+  pushRecovery: PushRecoveryPlan;
+}): ReleaseOpsDashboard {
+  const ciGates = input.ciGates ?? [];
+  const failedCi = ciGates.filter((gate) => !gate.ok).map((gate) => gate.name);
+  const failedQueue = buildFailureChecklist(input.evidence.gates);
+  return {
+    status: input.evidence.ok && failedCi.length === 0 ? 'ready' : 'blocked',
+    summary: `${input.evidence.summary}; ci ${ciGates.length - failedCi.length}/${ciGates.length} passed; push=${input.pushRecovery.status}`,
+    failedQueue,
+    primaryActionId: input.webActions.primaryActionId,
+    history: input.history,
+    ci: { total: ciGates.length, passed: ciGates.length - failedCi.length, failed: failedCi.length, failedGates: failedCi },
+    push: input.pushRecovery,
+  };
+}
+
+export interface SafeForwardExecutionStep {
+  index: number;
+  status: SafeForwardPlan['nextStatuses'][number];
+  command: string;
+  willExecute: boolean;
+}
+
+export interface SafeForwardExecutionPlan {
+  mode: 'dry-run' | 'execute';
+  executable: boolean;
+  confirmationRequired: string;
+  steps: SafeForwardExecutionStep[];
+  auditTrail: string[];
+}
+
+export function buildSafeForwardExecutionPlan(proposalId: string, plan: SafeForwardPlan, confirmation?: string): SafeForwardExecutionPlan {
+  const commandPlan = buildSafeForwardCommandPlan(proposalId, plan, confirmation);
+  const steps = plan.nextStatuses.map((status, index) => ({
+    index: index + 1,
+    status,
+    command: commandPlan.commands[index] ?? `python3 mcp_aisp.py update-proposal-status --proposal-id ${proposalId} --status ${status}`,
+    willExecute: commandPlan.executable,
+  }));
+  return {
+    mode: commandPlan.mode,
+    executable: commandPlan.executable,
+    confirmationRequired: commandPlan.confirmationRequired,
+    steps,
+    auditTrail: steps.map((step) => `${proposalId}:${step.status}:${step.willExecute ? 'execute' : 'dry-run'}`),
+  };
+}
+
+export interface CompactedDeliveryHistoryLedger {
+  total: number;
+  kept: AcceptanceEvidence[];
+  archived: DeliveryHistorySnapshot;
+}
+
+export function compactDeliveryHistoryLedger(items: AcceptanceEvidence[], keepLatest = 20): CompactedDeliveryHistoryLedger {
+  const keep = Math.max(0, keepLatest);
+  const splitAt = Math.max(0, items.length - keep);
+  const archivedItems = items.slice(0, splitAt);
+  const kept = items.slice(splitAt).map((item) => ({ ...item, gates: item.gates.map((gate) => ({ ...gate })) }));
+  return { total: items.length, kept, archived: buildDeliveryHistorySnapshot(archivedItems, archivedItems.length) };
+}
+
+export interface StructuredRunbookStep {
+  kind: 'precondition' | 'command' | 'mcp-forward';
+  label: string;
+  command?: string;
+  expected: string;
+}
+
+export interface StructuredRunbook {
+  title: string;
+  steps: StructuredRunbookStep[];
+  copyMarkdown: string;
+}
+
+export function buildStructuredRunbook(input: { evidence: AcceptanceEvidence; plan: SafeForwardPlan; commands: string[] }): StructuredRunbook {
+  const steps: StructuredRunbookStep[] = [
+    { kind: 'precondition', label: 'Verify delivery evidence', expected: input.evidence.summary },
+    ...input.commands.map((command) => ({ kind: 'command' as const, label: command, command, expected: 'exit code 0' })),
+    { kind: 'mcp-forward', label: 'Forward proposal status', command: input.plan.nextStatuses.join(' → '), expected: input.plan.canAdvance ? 'delivered' : 'test_failed' },
+  ];
+  const title = `Production Runbook — ${input.evidence.proposalId}`;
+  const copyMarkdown = [`# ${title}`, '', ...steps.map((step, index) => `${index + 1}. ${step.label}${step.command ? ` — \`${step.command}\`` : ''} (${step.expected})`), ''].join('\n');
+  return { title, steps, copyMarkdown };
+}
+
+export interface ReleaseLocalHardeningPlan {
+  storageRoot: string;
+  recursiveVerifyReadme: false;
+  commands: string[];
+  sideEffectPolicy: 'isolated-storage-root';
+}
+
+export function buildReleaseLocalHardeningPlan(baseDir: string): ReleaseLocalHardeningPlan {
+  const root = baseDir.replace(/\/$/, '');
+  return {
+    storageRoot: `${root}/.ima-release-local`,
+    recursiveVerifyReadme: false,
+    sideEffectPolicy: 'isolated-storage-root',
+    commands: ['npm run check', 'npm test', 'npm run coverage', 'npm run verify:readme', 'npm run build', 'npm run cli release-local-json'],
+  };
+}

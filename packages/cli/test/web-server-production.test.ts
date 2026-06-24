@@ -33,6 +33,12 @@ void test('web-server: /api/production exposes durable production operations sna
       runbook: string;
       recommendations: Array<{ id: string }>;
       safeForwardCommand: { mode: string; confirmationRequired: string };
+      safeForwardExecution: { mode: string; steps: Array<{ status: string }> };
+      structuredRunbook: { title: string; steps: Array<{ kind: string }> };
+      releaseOpsDashboard: { status: string; primaryActionId: string; push: { needsPush: boolean } };
+      compactedHistory: { total: number; kept: unknown[] };
+      releaseLocalHardening: { recursiveVerifyReadme: boolean; commands: string[] };
+      webActions: { primaryActionId: string; actions: Array<{ id: string }> };
     };
     assert.equal(response.status, 200);
     assert.equal(json.tokenLedger.totalCalls, 1);
@@ -53,8 +59,19 @@ void test('web-server: /api/production exposes durable production operations sna
     assert.equal(json.history.total, 1);
     assert.equal(json.safeForwardCommand.mode, 'dry-run');
     assert.match(json.safeForwardCommand.confirmationRequired, /EXECUTE P-20260624-013/);
+    assert.equal(json.safeForwardExecution.mode, 'dry-run');
+    assert.deepEqual(json.safeForwardExecution.steps.map((step) => step.status), ['in_test_acceptance', 'accepted', 'deployed', 'delivered']);
+    assert.match(json.structuredRunbook.title, /Production Runbook/);
+    assert.equal(json.releaseOpsDashboard.status, 'ready');
+    assert.equal(json.releaseOpsDashboard.primaryActionId, 'copy-mcp-commands');
+    assert.equal(json.releaseOpsDashboard.push.needsPush, false);
+    assert.equal(json.compactedHistory.total, 1);
+    assert.equal(json.releaseLocalHardening.recursiveVerifyReadme, false);
+    assert.ok(json.releaseLocalHardening.commands.includes('npm run verify:readme'));
     assert.match(json.runbook, /Production Runbook/);
     assert.ok(json.recommendations.some((rec) => rec.id === 'history-ledger-compaction'));
+    assert.equal(json.webActions.primaryActionId, 'copy-mcp-commands');
+    assert.deepEqual(json.webActions.actions.map((action) => action.id), ['copy-runbook', 'copy-mcp-commands', 'download-delivery-markdown']);
   } finally {
     await handle.close();
     rmSync(root, { recursive: true, force: true });

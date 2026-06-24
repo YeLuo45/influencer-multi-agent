@@ -14,6 +14,12 @@ import {
   buildSafeForwardPlan,
   buildDeliveryHistorySnapshot,
   buildDiffOwnership,
+  buildWebActionManifest,
+  buildReleaseOpsDashboard,
+  buildSafeForwardExecutionPlan,
+  buildStructuredRunbook,
+  compactDeliveryHistoryLedger,
+  buildReleaseLocalHardeningPlan,
   recommendNextIterations,
   createCredentialProbe,
   createPlatformAdapters,
@@ -74,14 +80,28 @@ function buildDeliveryOpsPayload(proposalId: string): Record<string, unknown> {
   const safeForward = buildSafeForwardPlan(evidence);
   const ownership = buildDiffOwnership(['packages/core/src/delivery-evidence.ts', 'packages/cli/src/web-server.ts', 'apps/web/app.js']);
   const checklist: FailureChecklistItem[] = [];
+  const webActions = buildWebActionManifest(evidence, safeForward);
+  const history = buildDeliveryHistorySnapshot([evidence]);
   return {
     release,
     evidence,
     safeForward,
-    history: buildDeliveryHistorySnapshot([evidence]),
+    history,
     safeForwardCommand: buildSafeForwardCommandPlan(proposalId, safeForward),
+    safeForwardExecution: buildSafeForwardExecutionPlan(proposalId, safeForward),
     runbook: buildProductionRunbook({ evidence, checklist, ownership, plan: safeForward }),
+    structuredRunbook: buildStructuredRunbook({ evidence, plan: safeForward, commands: ['npm run check', 'npm test', 'npm run coverage', 'npm run verify:readme', 'npm run build'] }),
     recommendations: recommendNextIterations({ evidence, ownership }),
+    webActions,
+    releaseOpsDashboard: buildReleaseOpsDashboard({
+      evidence,
+      plan: safeForward,
+      history,
+      webActions,
+      pushRecovery: { status: 'synced', needsPush: false, command: 'git push origin master', note: 'cli snapshot' },
+    }),
+    compactedHistory: compactDeliveryHistoryLedger([evidence], 20),
+    releaseLocalHardening: buildReleaseLocalHardeningPlan(process.cwd()),
     deliveryMarkdown: buildDeliveryMarkdown(evidence, safeForward),
     failureChecklist: checklist,
   };

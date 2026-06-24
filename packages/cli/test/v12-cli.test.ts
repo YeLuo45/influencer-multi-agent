@@ -88,12 +88,13 @@ void test('cli: production and release-local-json print machine-readable JSON', 
   try {
     const production = runCli(['production'], root);
     assert.equal(production.status, 0);
-    const snapshot = JSON.parse(production.stdout) as { replySafety: { readyForRealReply: boolean }; release: { ok: boolean }; history: { total: number }; recommendations: Array<{ id: string }>; runbook: string };
+    const snapshot = JSON.parse(production.stdout) as { replySafety: { readyForRealReply: boolean }; release: { ok: boolean }; history: { total: number }; recommendations: Array<{ id: string }>; runbook: string; webActions: { primaryActionId: string } };
     assert.equal(snapshot.replySafety.readyForRealReply, false);
     assert.equal(snapshot.release.ok, true);
     assert.equal(snapshot.history.total, 1);
     assert.ok(snapshot.recommendations.length >= 1);
     assert.match(snapshot.runbook, /Production Runbook/);
+    assert.equal(snapshot.webActions.primaryActionId, 'copy-mcp-commands');
 
     const safeForward = runCli(['delivery', 'safe-forward', '--proposal', 'P-20260624-013'], root);
     assert.equal(safeForward.status, 0);

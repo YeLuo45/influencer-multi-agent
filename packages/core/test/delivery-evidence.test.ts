@@ -11,6 +11,16 @@ import {
   buildProductionRunbook,
   ingestCiEvidence,
   recommendNextIterations,
+  buildPushRecoveryPlan,
+  buildDeliveryHistoryJsonl,
+  parseDeliveryHistoryJsonl,
+  buildWebActionManifest,
+  parseCiRunSummary,
+  buildReleaseOpsDashboard,
+  buildSafeForwardExecutionPlan,
+  compactDeliveryHistoryLedger,
+  buildStructuredRunbook,
+  buildReleaseLocalHardeningPlan,
   type DeliveryGateInput,
 } from '../src/delivery-evidence.js';
 
@@ -129,4 +139,100 @@ void test('recommendNextIterations ranks next directions from failures, diff own
   assert.equal(recs[0]?.id, 'stabilize-readme-gate');
   assert.ok(recs.some((rec) => rec.id === 'web-action-center'));
   assert.ok(recs.some((rec) => rec.id === 'route-coverage-hardening'));
+});
+
+void test('buildPushRecoveryPlan detects ahead local commit and emits retry command', () => {
+  const plan = buildPushRecoveryPlan({ local: 'd885dda', remote: '26b6a1d', branch: 'master', remoteName: 'origin' });
+  assert.equal(plan.needsPush, true);
+  assert.equal(plan.status, 'ahead');
+  assert.equal(plan.command, 'git push origin master');
+});
+
+void test('buildSafeForwardCommandPlan supports execute mode only with exact confirmation', () => {
+  const evidence = buildAcceptanceEvidence({ proposalId: 'P-20260624-016', gates: gates.map((gate) => ({ ...gate, ok: true })) });
+  const safe = buildSafeForwardPlan(evidence);
+  const wrong = buildSafeForwardCommandPlan('P-20260624-016', safe, 'EXECUTE P-wrong');
+  const right = buildSafeForwardCommandPlan('P-20260624-016', safe, 'EXECUTE P-20260624-016');
+  assert.equal(wrong.executable, false);
+  assert.equal(right.executable, true);
+  assert.equal(right.mode, 'execute');
+});
+
+void test('delivery history jsonl persists and parses evidence rows', () => {
+  const evidence = buildAcceptanceEvidence({ proposalId: 'P-20260624-016', commit: 'abc', gates: gates.map((gate) => ({ ...gate, ok: true })) });
+  const jsonl = buildDeliveryHistoryJsonl('', [evidence]);
+  const rows = parseDeliveryHistoryJsonl(jsonl);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]?.proposalId, 'P-20260624-016');
+  assert.equal(rows[0]?.ok, true);
+});
+
+void test('buildWebActionManifest exposes copy and download actions for production operators', () => {
+  const evidence = buildAcceptanceEvidence({ proposalId: 'P-20260624-016', gates: gates.map((gate) => ({ ...gate, ok: true })) });
+  const manifest = buildWebActionManifest(evidence, buildSafeForwardPlan(evidence));
+  assert.deepEqual(manifest.actions.map((action) => action.id), ['copy-runbook', 'copy-mcp-commands', 'download-delivery-markdown']);
+  assert.equal(manifest.primaryActionId, 'copy-mcp-commands');
+});
+
+void test('parseCiRunSummary converts CI job rows to delivery gates', () => {
+  const gatesFromCi = parseCiRunSummary({ provider: 'github-actions', jobs: [{ name: 'node-20', conclusion: 'success' }, { name: 'node-22', conclusion: 'failure' }] });
+  assert.deepEqual(gatesFromCi.map((gate) => [gate.name, gate.ok]), [['github-actions/node-20', true], ['github-actions/node-22', false]]);
+  const merged = ingestCiEvidence(buildAcceptanceEvidence({ proposalId: 'P-20260624-016', gates: gates.map((gate) => ({ ...gate, ok: true })) }), gatesFromCi);
+  assert.deepEqual(merged.failedGates, ['github-actions/node-22']);
+});
+
+void test('buildReleaseOpsDashboard summarizes failed queues, actions, history, CI and push recovery', () => {
+  const evidence = buildAcceptanceEvidence({ proposalId: 'P-20260624-020', commit: 'local', gates, web: { url: 'http://127.0.0.1:5173/', httpStatus: 200, apiKeys: 7 } });
+  const safeForward = buildSafeForwardPlan(evidence);
+  const dashboard = buildReleaseOpsDashboard({
+    evidence,
+    plan: safeForward,
+    history: buildDeliveryHistorySnapshot([evidence]),
+    webActions: buildWebActionManifest(evidence, safeForward),
+    ciGates: parseCiRunSummary({ provider: 'github-actions', jobs: [{ name: 'node-20', conclusion: 'success' }] }),
+    pushRecovery: buildPushRecoveryPlan({ local: 'abc', remote: 'def' }),
+  });
+  assert.equal(dashboard.status, 'blocked');
+  assert.deepEqual(dashboard.failedQueue.map((item) => item.gate), ['verify:readme']);
+  assert.equal(dashboard.primaryActionId, 'copy-runbook');
+  assert.equal(dashboard.ci.passed, 1);
+  assert.equal(dashboard.push.needsPush, true);
+});
+
+void test('buildSafeForwardExecutionPlan emits auditable steps only after exact confirmation', () => {
+  const evidence = buildAcceptanceEvidence({ proposalId: 'P-20260624-021', gates: gates.map((gate) => ({ ...gate, ok: true })) });
+  const plan = buildSafeForwardPlan(evidence);
+  const dry = buildSafeForwardExecutionPlan('P-20260624-021', plan, 'EXECUTE wrong');
+  const execute = buildSafeForwardExecutionPlan('P-20260624-021', plan, 'EXECUTE P-20260624-021');
+  assert.equal(dry.mode, 'dry-run');
+  assert.equal(dry.steps.every((step) => step.willExecute === false), true);
+  assert.equal(execute.mode, 'execute');
+  assert.deepEqual(execute.steps.map((step) => step.status), ['in_test_acceptance', 'accepted', 'deployed', 'delivered']);
+  assert.match(execute.auditTrail[0] ?? '', /P-20260624-021:in_test_acceptance/);
+});
+
+void test('compactDeliveryHistoryLedger keeps latest rows and aggregates old trend', () => {
+  const rows = ['P1', 'P2', 'P3', 'P4'].map((id, index) => buildAcceptanceEvidence({ proposalId: id, commit: `c${index}`, gates: index === 1 ? gates : gates.map((gate) => ({ ...gate, ok: true })) }));
+  const compacted = compactDeliveryHistoryLedger(rows, 2);
+  assert.equal(compacted.total, 4);
+  assert.equal(compacted.kept.length, 2);
+  assert.deepEqual(compacted.kept.map((row) => row.proposalId), ['P3', 'P4']);
+  assert.equal(compacted.archived.total, 2);
+  assert.deepEqual(compacted.archived.failedGateTop, [{ gate: 'verify:readme', count: 1 }]);
+});
+
+void test('buildStructuredRunbook exposes copy-ready ordered production steps', () => {
+  const evidence = buildAcceptanceEvidence({ proposalId: 'P-20260624-022', gates: gates.map((gate) => ({ ...gate, ok: true })) });
+  const structured = buildStructuredRunbook({ evidence, plan: buildSafeForwardPlan(evidence), commands: ['npm run check', 'npm test'] });
+  assert.equal(structured.title, 'Production Runbook — P-20260624-022');
+  assert.deepEqual(structured.steps.map((step) => step.kind), ['precondition', 'command', 'command', 'mcp-forward']);
+  assert.match(structured.copyMarkdown, /npm run check/);
+});
+
+void test('buildReleaseLocalHardeningPlan isolates storage and avoids recursive README verification', () => {
+  const hardening = buildReleaseLocalHardeningPlan('/tmp/ima-release');
+  assert.equal(hardening.storageRoot, '/tmp/ima-release/.ima-release-local');
+  assert.equal(hardening.recursiveVerifyReadme, false);
+  assert.ok(hardening.commands.includes('npm run verify:readme'));
+  assert.ok(hardening.commands.includes('npm run cli release-local-json'));
 });

@@ -31,6 +31,12 @@ import {
   buildSafeForwardPlan,
   buildDeliveryHistorySnapshot,
   buildDiffOwnership,
+  buildWebActionManifest,
+  buildReleaseOpsDashboard,
+  buildSafeForwardExecutionPlan,
+  buildStructuredRunbook,
+  compactDeliveryHistoryLedger,
+  buildReleaseLocalHardeningPlan,
   recommendNextIterations,
   createPlatformAdapters,
   createStubChannelAdapter,
@@ -256,9 +262,21 @@ async function apiProduction(res: ServerResponse, ctx: HandleCtx): Promise<void>
   const ownership = buildDiffOwnership(['packages/core/src/delivery-evidence.ts', 'packages/cli/src/web-server.ts', 'apps/web/app.js']);
   const history = buildDeliveryHistorySnapshot([evidence]);
   const safeForwardCommand = buildSafeForwardCommandPlan('P-20260624-013', safeForward);
+  const safeForwardExecution = buildSafeForwardExecutionPlan('P-20260624-013', safeForward);
   const checklist = buildFailureChecklist(gates);
   const runbook = buildProductionRunbook({ evidence, checklist, ownership, plan: safeForward });
+  const structuredRunbook = buildStructuredRunbook({ evidence, plan: safeForward, commands: ['npm run check', 'npm test', 'npm run coverage', 'npm run verify:readme', 'npm run build'] });
   const recommendations = recommendNextIterations({ evidence, ownership });
+  const webActions = buildWebActionManifest(evidence, safeForward);
+  const releaseOpsDashboard = buildReleaseOpsDashboard({
+    evidence,
+    plan: safeForward,
+    history,
+    webActions,
+    pushRecovery: { status: 'synced', needsPush: false, command: 'git push origin master', note: 'web snapshot' },
+  });
+  const compactedHistory = compactDeliveryHistoryLedger([evidence], 20);
+  const releaseLocalHardening = buildReleaseLocalHardeningPlan(process.cwd());
   const snapshot = buildProductionConsoleSnapshot({
     replies: executeReplyQueue([], { sandbox: true, now: ctx.now(), actor: 'web' }),
     budget,
@@ -269,7 +287,7 @@ async function apiProduction(res: ServerResponse, ctx: HandleCtx): Promise<void>
     tokenLedger: { totalCalls: tokenEntries.length, totalCostUsd: tokenEntries.reduce((sum, entry) => sum + entry.costUsd, 0) },
     replyQueue: buildReplyQueueState([]),
   });
-  sendJson(res, { ...snapshot, evidence, safeForward, failureChecklist: checklist, deliveryMarkdown: buildDeliveryMarkdown(evidence, safeForward), history, safeForwardCommand, runbook, recommendations });
+  sendJson(res, { ...snapshot, evidence, safeForward, failureChecklist: checklist, deliveryMarkdown: buildDeliveryMarkdown(evidence, safeForward), history, safeForwardCommand, safeForwardExecution, runbook, structuredRunbook, recommendations, webActions, releaseOpsDashboard, compactedHistory, releaseLocalHardening });
 }
 
 async function apiRoadmap(res: ServerResponse, _ctx: HandleCtx): Promise<void> {

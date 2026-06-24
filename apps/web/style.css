@@ -183,3 +183,25 @@ h2 {
   text-align: center;
   padding: 32px 0;
 }
+
+.production-actions {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+.ops-summary,
+.action-grid {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.ops-detail {
+  color: var(--muted);
+  font-size: 12px;
+}
+.production-action {
+  min-width: 150px;
+}
