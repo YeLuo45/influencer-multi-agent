@@ -25,6 +25,10 @@ void test('web-server: /api/production exposes durable production operations sna
       audit: { total: number; byKind: Record<string, number> };
       release: { action: { canDeploy: boolean; command: string } };
       channel: { steps: string[] };
+      evidence: { ok: boolean; passed: number; total: number; failedGates: string[] };
+      safeForward: { canAdvance: boolean; nextStatuses: string[] };
+      failureChecklist: Array<{ gate: string; hint: string }>;
+      deliveryMarkdown: string;
     };
     assert.equal(response.status, 200);
     assert.equal(json.tokenLedger.totalCalls, 1);
@@ -34,6 +38,14 @@ void test('web-server: /api/production exposes durable production operations sna
     assert.equal(json.release.action.canDeploy, true);
     assert.equal(json.release.action.command, 'git push origin master');
     assert.ok(json.channel.steps.includes('auth-probe:false'));
+    assert.equal(json.evidence.ok, true);
+    assert.equal(json.evidence.passed, 5);
+    assert.equal(json.evidence.total, 5);
+    assert.deepEqual(json.evidence.failedGates, []);
+    assert.equal(json.safeForward.canAdvance, true);
+    assert.deepEqual(json.safeForward.nextStatuses, ['in_test_acceptance', 'accepted', 'deployed', 'delivered']);
+    assert.deepEqual(json.failureChecklist, []);
+    assert.match(json.deliveryMarkdown, /Delivery Evidence/);
   } finally {
     await handle.close();
     rmSync(root, { recursive: true, force: true });

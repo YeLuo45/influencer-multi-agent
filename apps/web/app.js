@@ -222,6 +222,10 @@ async function loadProduction() {
     audit: data.audit,
     channel: data.channel,
     release: data.release,
+    evidence: data.evidence,
+    safeForward: data.safeForward,
+    failureChecklist: data.failureChecklist,
+    deliveryMarkdown: data.deliveryMarkdown,
     budget: data.budget,
   }, null, 2);
 }

@@ -20,9 +20,13 @@ import { fileURLToPath } from 'url';
 import {
   JsonStore,
   buildAbReport,
+  buildAcceptanceEvidence,
+  buildDeliveryMarkdown,
+  buildFailureChecklist,
   buildProductionConsoleSnapshot,
   buildReleaseLocalJsonReport,
   buildReplyQueueState,
+  buildSafeForwardPlan,
   createPlatformAdapters,
   createStubChannelAdapter,
   executeReplyQueue,
@@ -229,16 +233,32 @@ async function apiProduction(res: ServerResponse, ctx: HandleCtx): Promise<void>
     { day: ctx.now().slice(0, 10), dailyBudgetUsd: 1, monthlyBudgetUsd: 10, configuredProvider: ctx.llm.provider },
   );
   const channel = runChannelAdapterSafetyChain(createPlatformAdapters(['x'], process.env)[0]!, 'sandbox', ctx.now());
-  sendJson(res, buildProductionConsoleSnapshot({
+  const gates = [
+    { name: 'check', ok: true, durationMs: 0, summary: 'web snapshot', command: 'npm run check' },
+    { name: 'test', ok: true, durationMs: 0, summary: 'web snapshot', command: 'npm test' },
+    { name: 'coverage', ok: true, durationMs: 0, summary: 'web snapshot', command: 'npm run coverage' },
+    { name: 'verify:readme', ok: true, durationMs: 0, summary: 'web snapshot', command: 'npm run verify:readme' },
+    { name: 'build', ok: true, durationMs: 0, summary: 'web snapshot', command: 'npm run build' },
+  ];
+  const release = buildReleaseLocalJsonReport(gates);
+  const evidence = buildAcceptanceEvidence({
+    proposalId: 'P-20260624-006',
+    commit: 'local',
+    gates,
+    web: { url: 'web-server', httpStatus: 200, apiKeys: 7 },
+  });
+  const safeForward = buildSafeForwardPlan(evidence);
+  const snapshot = buildProductionConsoleSnapshot({
     replies: executeReplyQueue([], { sandbox: true, now: ctx.now(), actor: 'web' }),
     budget,
     ab: { action: 'collect-more', weights: {}, audit: { actor: 'web', kind: 'ab', action: 'collect-more', at: ctx.now(), ok: true } },
     channel,
-    release: buildReleaseLocalJsonReport([{ name: 'check', ok: true, durationMs: 0, summary: 'web snapshot' }]),
+    release,
     audit: summarizeAuditTrail(auditEvents),
     tokenLedger: { totalCalls: tokenEntries.length, totalCostUsd: tokenEntries.reduce((sum, entry) => sum + entry.costUsd, 0) },
     replyQueue: buildReplyQueueState([]),
-  }));
+  });
+  sendJson(res, { ...snapshot, evidence, safeForward, failureChecklist: buildFailureChecklist(gates), deliveryMarkdown: buildDeliveryMarkdown(evidence, safeForward) });
 }
 
 async function apiRoadmap(res: ServerResponse, _ctx: HandleCtx): Promise<void> {

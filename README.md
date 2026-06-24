@@ -2,6 +2,16 @@
 
 多智能体跨平台大 V 全自动运营交付系统：根据网上热点生成内容并跨平台发布。
 
+## v3.6 新增（Delivery Evidence & Safe Forward Gate）
+
+| 方向 | 实现 |
+|---|---|
+| **验收证据模型** | `core/src/delivery-evidence.ts` 聚合 check/test/coverage/verify:readme/build 五门禁、local web 验证、失败门禁和 copy-ready Markdown |
+| **安全状态推进计划** | `buildSafeForwardPlan()` 只在证据全绿时输出 `in_test_acceptance → accepted → deployed → delivered`；失败时只允许 `test_failed` |
+| **失败提示清单** | `buildFailureChecklist()` 为 failed gate 给出 deterministic remediation hints，避免无人值守误推进 |
+| **Diff ownership 分类** | `buildDiffOwnership()` 区分 proposal docs / product code / tests / generated artifacts / docs，交付报告可解释改动归属 |
+| **Web 生产运营扩展** | `/api/production` 新增 `evidence`、`safeForward`、`failureChecklist`、`deliveryMarkdown`，首页「生产运营」tab 直接可见 |
+
 ## v2.9 新增（Production Operations Console）
 
 | 方向 | 实现 |
@@ -226,8 +236,11 @@ node --test --import tsx packages/core/test/secret-diagnostics.test.ts   # 验�
 node --test --import tsx packages/core/test/persistent-metrics.test.ts   # 验证 .ima/metrics.jsonl + Prometheus 序列化
 node --test --import tsx packages/core/test/roadmap.test.ts              # 验证无人值守路线图 7 方向纯函数
 node --test --import tsx packages/cli/test/web-server-metrics.test.ts    # 验证 /metrics 端点
+node --test --import tsx packages/core/test/production-automation.test.ts # 验证 production reply/budget/AB/channel/release helpers
+node --test --import tsx packages/core/test/delivery-evidence.test.ts     # 验证 delivery evidence / safe-forward / failure hints
 node --test --import tsx packages/cli/test/web-server-events.test.ts     # 验证 /api/events SSE 首帧 snapshot
 node --test --import tsx packages/cli/test/web-server-roadmap.test.ts    # 验证 /api/roadmap 路线图摘要
+node --test --import tsx packages/cli/test/web-server-production.test.ts  # 验证 /api/production evidence payload
 node --test --import tsx packages/cli/test/web-ui-events.test.ts         # 验证 Web Header 实时 badge + EventSource 自动刷新
 node --test --import tsx packages/cli/test/web-ui-roadmap.test.ts        # 验证 Web 路线图 tab 可发现
 npm run cli bootstrap-real [--write-back-to-feedback]  # 跑 bootstrap demo（v0.8 抽象版）
