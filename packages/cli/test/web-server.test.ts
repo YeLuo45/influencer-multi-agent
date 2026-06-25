@@ -251,3 +251,22 @@ void test('web-server: /api/production exposes composed Web Ops completion pack'
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+void test('web-server: /api/production exposes execution SLA pack', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'ima-web-'));
+  let handle: WebServerHandle | null = null;
+  try {
+    const store = seedStore(root);
+    handle = await startWebServer({ store, port: 0, host: '127.0.0.1', now: () => '2026-06-25T04:00:00.000Z' });
+    const r = await getJson(`${handle.url}/api/production`);
+    assert.equal(r.status, 200);
+    const data = r.json as { executionSla?: { proposalId: string; executionAdapter: { mode: string }; auditLedger: { path: string }; slaDashboard: { metrics: Array<{ id: string }> } } };
+    assert.equal(data.executionSla?.proposalId, 'P-20260625-012');
+    assert.equal(data.executionSla?.executionAdapter.mode, 'dry-run');
+    assert.equal(data.executionSla?.auditLedger.path, '.ima/release-ops/web-audit.jsonl');
+    assert.ok(data.executionSla?.slaDashboard.metrics.some((metric) => metric.id === 'credential-expiry'));
+  } finally {
+    if (handle) await handle.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

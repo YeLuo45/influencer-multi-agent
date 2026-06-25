@@ -220,6 +220,7 @@ async function loadProduction() {
   const dashboard = data.releaseOpsDashboard ?? {};
   const readiness = data.executionReadiness ?? {};
   const completion = data.webOpsCompletion ?? {};
+  const executionSla = data.executionSla ?? {};
   const actions = data.webActions?.actions ?? [];
   els.productionActions.innerHTML = `
     <div class="ops-summary">
@@ -229,6 +230,7 @@ async function loadProduction() {
       ${badge(`push=${dashboard.push?.status ?? '-'}`, dashboard.push?.needsPush ? 'failed_retry' : 'posted')}
       ${badge(`exec=${readiness.status ?? 'unknown'}`, readiness.status === 'ready' ? 'posted' : 'failed_retry')}
       ${badge(`connectors=${readiness.connectorMatrix?.ready ?? 0}/${readiness.connectorMatrix?.total ?? 0}`, readiness.connectorMatrix?.blocked ? 'failed_retry' : 'posted')}
+      ${badge(`sla=${executionSla.slaDashboard?.status ?? 'unknown'}`, executionSla.slaDashboard?.status === 'ok' ? 'posted' : 'failed_retry')}
     </div>
     <div class="action-grid">
       ${actions.map((action) => `
@@ -240,6 +242,11 @@ async function loadProduction() {
       <button class="btn-secondary production-action" data-action-id="webops-credential-wizard" data-payload="${escapeHtml(completion.webMode?.credentialWizard?.copyGuide ?? '')}">Credential Wizard</button>
       <button class="btn-secondary production-action" data-action-id="webops-replay-persistence" data-payload="${escapeHtml(completion.scenarioPersistence?.appendPreview ?? '')}">Replay Persistence</button>
       <button class="btn-secondary production-action" data-action-id="webops-delivery-closure" data-payload="${escapeHtml((completion.deliveryClosure?.commands ?? []).join('\n'))}">Delivery Closure</button>
+      <button class="btn-secondary production-action" data-action-id="sla-execution-adapter" data-payload="${escapeHtml(executionSla.executionAdapter?.command ?? '')}">Execution Adapter</button>
+      <button class="btn-secondary production-action" data-action-id="sla-audit-ledger" data-payload="${escapeHtml(executionSla.auditLedger?.appendPreview ?? '')}">Audit Ledger</button>
+      <button class="btn-secondary production-action" data-action-id="sla-ci-artifact-read" data-payload="${escapeHtml((executionSla.ciArtifactRead?.commands ?? []).join('\n'))}">CI Artifact Read</button>
+      <button class="btn-secondary production-action" data-action-id="sla-credential-probe" data-payload="${escapeHtml((executionSla.credentialProbe?.rows ?? []).map((row) => row.probeCommand).join('\n'))}">Credential Probe</button>
+      <button class="btn-secondary production-action" data-action-id="sla-dashboard" data-payload="${escapeHtml(JSON.stringify(executionSla.slaDashboard ?? {}, null, 2))}">SLA Dashboard</button>
     </div>
     <div class="ops-detail">
       <strong>Failed queue:</strong> ${(dashboard.failedQueue ?? []).map((item) => escapeHtml(item.gate)).join(', ') || 'none'}
@@ -249,6 +256,7 @@ async function loadProduction() {
       · <strong>Replay:</strong> ${readiness.replaySandbox?.sideEffects === false ? 'dry-run only' : 'unknown'}
       · <strong>Timeline:</strong> ${data.eventTimeline?.events?.length ?? 0} events
       · <strong>Credential:</strong> ${data.credentialHealthCenter?.ok ? 'ok' : 'needs attention'}
+      · <strong>SLA Dashboard:</strong> ${executionSla.slaDashboard?.metrics?.length ?? 0} metrics
       · <strong>Next Web:</strong> ${data.webModeEnhancements?.[0]?.id ?? '-'}
     </div>
   `;
@@ -264,6 +272,7 @@ async function loadProduction() {
     });
   });
   els.productionOutput.textContent = JSON.stringify({
+    executionSla: data.executionSla,
     webOpsCompletion: data.webOpsCompletion,
     releaseOpsDashboard: data.releaseOpsDashboard,
     executionReadiness: data.executionReadiness,

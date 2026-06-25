@@ -26,6 +26,7 @@ import {
   buildOperatorSessionReplay,
   buildWebModeExperiencePack,
   buildWebOpsCompletionPack,
+  buildProductionExecutionSlaPack,
   type PlatformConnectorInput,
   type ProductionApprovalAction,
   type ProductionRunRecord,
@@ -288,4 +289,27 @@ void test('buildWebOpsCompletionPack aggregates all remaining unattended web ops
   assert.equal(completion.ciImport.commands[0], 'gh run list --branch master --limit 1 --json databaseId,conclusion,headSha');
   assert.equal(completion.deliveryClosure.statusPath.join(' -> '), 'in_test_acceptance -> accepted -> deployed -> delivered');
   assert.match(completion.operatorTimeline.copyMarkdown, /copy-safe-execute/);
+});
+
+void test('buildProductionExecutionSlaPack models execution readiness, audit persistence, CI reads, credential probes and SLA', () => {
+  const pack = buildProductionExecutionSlaPack({
+    proposalId: 'P-20260625-012',
+    now: '2026-06-25T04:00:00.000Z',
+    approvalRows: buildPersistentApprovalStore(buildApprovalQueue(actions), { rootDir: '.ima/release-ops', now: '2026-06-25T03:00:00.000Z' }).rows,
+    credentialHealth: buildCredentialHealthCenter(buildCredentialRotationPlan([
+      { platform: 'x', envKey: 'IMA_X_TOKEN', present: true, expiresInDays: 3, scopes: ['post:write'] },
+      { platform: 'reddit', envKey: 'IMA_REDDIT_TOKEN', present: false, expiresInDays: null, scopes: [] },
+    ])),
+    ciArtifacts: [{ path: '.ima/release-ops/ci/evidence.json', exists: true, modifiedAt: '2026-06-25T03:30:00.000Z' }],
+    auditEvents: [{ at: '2026-06-25T03:45:00.000Z', action: 'click-safe-execute', target: 'web', result: 'ok' }],
+    runs,
+  });
+  assert.equal(pack.proposalId, 'P-20260625-012');
+  assert.equal(pack.executionAdapter.mode, 'dry-run');
+  assert.equal(pack.executionAdapter.confirmationRequired, 'EXECUTE P-20260625-012');
+  assert.equal(pack.auditLedger.path, '.ima/release-ops/web-audit.jsonl');
+  assert.equal(pack.ciArtifactRead.found, 1);
+  assert.deepEqual(pack.credentialProbe.rows.map((row) => row.status), ['warning', 'critical']);
+  assert.equal(pack.slaDashboard.status, 'attention');
+  assert.ok(pack.slaDashboard.metrics.some((metric) => metric.id === 'pending-approval-age'));
 });

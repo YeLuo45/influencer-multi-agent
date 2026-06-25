@@ -31,3 +31,14 @@ void test('web ui: exposes Web Ops completion controls in production panel', () 
   assert.match(js, /Replay Persistence/);
   assert.match(js, /Delivery Closure/);
 });
+
+void test('web ui: exposes production execution SLA controls', () => {
+  const js = readFileSync(resolve(repoRoot, 'apps/web/app.js'), 'utf-8');
+
+  assert.match(js, /executionSla/);
+  assert.match(js, /Execution Adapter/);
+  assert.match(js, /Audit Ledger/);
+  assert.match(js, /CI Artifact Read/);
+  assert.match(js, /Credential Probe/);
+  assert.match(js, /SLA Dashboard/);
+});

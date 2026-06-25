@@ -47,6 +47,7 @@ import {
   buildSafeExecutePlan,
   buildWebModeEnhancementDirections,
   buildWebOpsCompletionPack,
+  buildProductionExecutionSlaPack,
   recommendNextIterations,
   createPlatformAdapters,
   createStubChannelAdapter,
@@ -332,6 +333,18 @@ async function apiProduction(res: ServerResponse, ctx: HandleCtx): Promise<void>
       { at: ctx.now(), action: 'copy-safe-execute', target: 'approval', result: 'ok' },
     ],
   });
+  const executionSla = buildProductionExecutionSlaPack({
+    proposalId: 'P-20260625-012',
+    now: ctx.now(),
+    approvalRows: approvalStore.rows,
+    credentialHealth: credentialHealthCenter,
+    ciArtifacts: [{ path: '.ima/release-ops/ci/release-evidence.json', exists: true, modifiedAt: ctx.now() }],
+    auditEvents: [
+      { at: ctx.now(), action: 'open-production-panel', target: 'web', result: 'ok' },
+      { at: ctx.now(), action: 'copy-safe-execute', target: 'approval', result: 'ok' },
+    ],
+    runs: [{ id: 'local-web-snapshot', ok: evidence.ok, durationMs: 0, failedGates: evidence.failedGates, platformErrors: channel.ok ? {} : { x: 1 }, at: ctx.now() }],
+  });
   const snapshot = buildProductionConsoleSnapshot({
     replies: executeReplyQueue([], { sandbox: true, now: ctx.now(), actor: 'web' }),
     budget,
@@ -342,7 +355,7 @@ async function apiProduction(res: ServerResponse, ctx: HandleCtx): Promise<void>
     tokenLedger: { totalCalls: tokenEntries.length, totalCostUsd: tokenEntries.reduce((sum, entry) => sum + entry.costUsd, 0) },
     replyQueue: buildReplyQueueState([]),
   });
-  sendJson(res, { ...snapshot, evidence, safeForward, failureChecklist: checklist, deliveryMarkdown: buildDeliveryMarkdown(evidence, safeForward), history, safeForwardCommand, safeForwardExecution, runbook, structuredRunbook, recommendations, webActions, releaseOpsDashboard, compactedHistory, releaseLocalHardening, executionReadiness, connectorExecution, approvalStore, credentialHealthCenter, ciArtifactIngest, replayScenarios, eventTimeline, safeExecutePreview, webModeEnhancements, webOpsCompletion });
+  sendJson(res, { ...snapshot, evidence, safeForward, failureChecklist: checklist, deliveryMarkdown: buildDeliveryMarkdown(evidence, safeForward), history, safeForwardCommand, safeForwardExecution, runbook, structuredRunbook, recommendations, webActions, releaseOpsDashboard, compactedHistory, releaseLocalHardening, executionReadiness, connectorExecution, approvalStore, credentialHealthCenter, ciArtifactIngest, replayScenarios, eventTimeline, safeExecutePreview, webModeEnhancements, webOpsCompletion, executionSla });
 }
 
 async function apiRoadmap(res: ServerResponse, _ctx: HandleCtx): Promise<void> {

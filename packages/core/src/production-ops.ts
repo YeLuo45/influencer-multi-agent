@@ -664,6 +664,25 @@ export interface WebOpsCompletionPack {
   deliveryClosure: DeliveryClosurePlan;
 }
 
+export interface ProductionExecutionSlaInput {
+  proposalId: string;
+  now: string;
+  approvalRows: ApprovalStoreRow[];
+  credentialHealth: CredentialHealthCenter;
+  ciArtifacts: Array<{ path: string; exists: boolean; modifiedAt: string }>;
+  auditEvents: OperatorSessionAction[];
+  runs: ProductionRunRecord[];
+}
+
+export interface ProductionExecutionSlaPack {
+  proposalId: string;
+  executionAdapter: { mode: 'dry-run'; confirmationRequired: string; command: string; sideEffects: false };
+  auditLedger: { path: string; appendPreview: string; eventCount: number };
+  ciArtifactRead: { found: number; missing: number; latestPath: string | null; commands: string[] };
+  credentialProbe: { rows: Array<{ platform: PlatformId; status: CredentialHealthCard['severity']; probeCommand: string; note: string }> };
+  slaDashboard: { status: 'ok' | 'attention'; metrics: Array<{ id: string; value: number; unit: string; status: 'ok' | 'attention' }> };
+}
+
 export interface WebModeExperiencePack {
   mode: 'operator-workbench';
   commandPalette: WebCommandPalette;
@@ -710,6 +729,52 @@ export function buildWebOpsCompletionPack(input: WebOpsCompletionPackInput): Web
       proposalId: input.proposalId,
       statusPath,
       commands: statusPath.map((status) => `python3 mcp_aisp.py update-proposal-status --proposal-id ${input.proposalId} --status ${status}`),
+    },
+  };
+}
+
+export function buildProductionExecutionSlaPack(input: ProductionExecutionSlaInput): ProductionExecutionSlaPack {
+  const newestArtifact = input.ciArtifacts.filter((artifact) => artifact.exists).sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt))[0];
+  const pendingApprovals = input.approvalRows.filter((row) => row.status === 'pending');
+  const oldestPending = pendingApprovals.map((row) => Date.parse(input.now) - Date.parse(row.at)).filter((age) => Number.isFinite(age)).sort((a, b) => b - a)[0] ?? 0;
+  const credentialIssues = input.credentialHealth.cards.filter((card) => card.severity !== 'ok').length;
+  const failedRuns = input.runs.filter((run) => !run.ok).length;
+  const metrics = [
+    { id: 'pending-approval-age', value: Math.round(oldestPending / 60000), unit: 'minutes', status: pendingApprovals.length > 0 ? 'attention' : 'ok' },
+    { id: 'credential-expiry', value: credentialIssues, unit: 'issues', status: credentialIssues > 0 ? 'attention' : 'ok' },
+    { id: 'ci-artifacts-found', value: input.ciArtifacts.filter((artifact) => artifact.exists).length, unit: 'artifacts', status: newestArtifact ? 'ok' : 'attention' },
+    { id: 'failed-runs', value: failedRuns, unit: 'runs', status: failedRuns > 0 ? 'attention' : 'ok' },
+  ] satisfies ProductionExecutionSlaPack['slaDashboard']['metrics'];
+  return {
+    proposalId: input.proposalId,
+    executionAdapter: {
+      mode: 'dry-run',
+      confirmationRequired: `EXECUTE ${input.proposalId}`,
+      command: `npm run cli safe-execute ${pendingApprovals[0]?.id ?? '<action-id>'} --approval "EXECUTE ${input.proposalId}"`,
+      sideEffects: false,
+    },
+    auditLedger: {
+      path: '.ima/release-ops/web-audit.jsonl',
+      appendPreview: input.auditEvents.map((event) => JSON.stringify(event)).join('\n') + (input.auditEvents.length > 0 ? '\n' : ''),
+      eventCount: input.auditEvents.length,
+    },
+    ciArtifactRead: {
+      found: input.ciArtifacts.filter((artifact) => artifact.exists).length,
+      missing: input.ciArtifacts.filter((artifact) => !artifact.exists).length,
+      latestPath: newestArtifact?.path ?? null,
+      commands: ['gh run list --branch master --limit 1 --json databaseId,conclusion,headSha', 'gh run download <run-id> -n release-evidence -D .ima/release-ops/ci'],
+    },
+    credentialProbe: {
+      rows: input.credentialHealth.cards.map((card) => ({
+        platform: card.platform,
+        status: card.severity,
+        probeCommand: `npm run cli credential probe --platform ${card.platform}`,
+        note: card.note,
+      })),
+    },
+    slaDashboard: {
+      status: metrics.some((metric) => metric.status === 'attention') ? 'attention' : 'ok',
+      metrics,
     },
   };
 }
