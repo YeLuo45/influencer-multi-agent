@@ -430,6 +430,241 @@ export function buildWebModeEnhancementDirections(): WebModeEnhancementDirection
   ];
 }
 
+export interface WebCommandPaletteCommand {
+  id: string;
+  label: string;
+  command: string;
+  intent: 'gate' | 'approval' | 'credential';
+  sideEffects: false;
+}
+
+export interface WebCommandPalette {
+  primary: WebCommandPaletteCommand;
+  commands: WebCommandPaletteCommand[];
+}
+
+export function buildWebCommandPalette(gates: string[]): WebCommandPalette {
+  const gateCommand = gates.length > 0 ? gates.join(' && npm run ') : 'check';
+  const commands: WebCommandPaletteCommand[] = [
+    { id: 'run-all-gates', label: 'Run all local gates', command: `npm run ${gateCommand}`, intent: 'gate', sideEffects: false },
+    { id: 'copy-safe-execute', label: 'Copy safe-execute command', command: 'npm run cli safe-execute -- --dry-run', intent: 'approval', sideEffects: false },
+    { id: 'open-credential-wizard', label: 'Open credential setup wizard', command: 'npm run cli production --credentials', intent: 'credential', sideEffects: false },
+  ];
+  return { primary: commands[0]!, commands };
+}
+
+export interface ApprovalDiffPreviewInput {
+  actionId: string;
+  command: string;
+  payload: Record<string, unknown>;
+  changedFiles: string[];
+  risk: ProductionRisk;
+}
+
+export interface ApprovalDiffPreview {
+  actionId: string;
+  risk: ProductionRisk;
+  command: string;
+  payloadJson: string;
+  changedFileGroups: { productCode: string[]; docs: string[]; other: string[] };
+  copyMarkdown: string;
+}
+
+export function buildApprovalDiffPreview(input: ApprovalDiffPreviewInput): ApprovalDiffPreview {
+  const changedFileGroups = groupChangedFiles(input.changedFiles);
+  const payloadJson = JSON.stringify(input.payload, null, 2);
+  const copyMarkdown = [
+    `# Approval Preview: ${input.actionId}`,
+    '',
+    `- Risk: ${input.risk}`,
+    `- Command: \`${input.command}\``,
+    '',
+    '```json',
+    payloadJson,
+    '```',
+    '',
+    ...input.changedFiles.map((file) => `- ${file}`),
+    '',
+  ].join('\n');
+  return { actionId: input.actionId, risk: input.risk, command: input.command, payloadJson, changedFileGroups, copyMarkdown };
+}
+
+export interface CredentialWizardStep {
+  id: string;
+  title: string;
+  displaysSecret: false;
+}
+
+export interface CredentialSetupWizard {
+  ok: boolean;
+  steps: CredentialWizardStep[];
+  copyGuide: string;
+}
+
+export function buildCredentialSetupWizard(center: CredentialHealthCenter): CredentialSetupWizard {
+  const failing = center.cards.filter((card) => card.severity !== 'ok');
+  const targets = failing.length > 0 ? failing : center.cards;
+  const firstVisible = targets[0]?.visible ?? 'IMA_PLATFORM_TOKEN=***';
+  return {
+    ok: center.ok,
+    steps: [
+      { id: 'collect-token', title: `Collect token for ${firstVisible}`, displaysSecret: false },
+      { id: 'write-env', title: 'Write masked key into local .env only', displaysSecret: false },
+      { id: 'probe-health', title: 'Run credential health probe before real execute', displaysSecret: false },
+    ],
+    copyGuide: targets.map((card) => `${card.visible} — ${card.note}`).join('\n'),
+  };
+}
+
+export interface TimelineFilterInput {
+  kind?: ReleaseOpsTimelineEvent['kind'];
+  query?: string;
+  onlyFailures?: boolean;
+}
+
+export interface FilteredReleaseOpsTimeline extends ReleaseOpsEventTimeline {
+  empty: boolean;
+}
+
+export function filterReleaseOpsTimeline(timeline: ReleaseOpsEventTimeline, input: TimelineFilterInput): FilteredReleaseOpsTimeline {
+  const query = input.query?.trim().toLowerCase() ?? '';
+  const events = timeline.events.filter((event) => {
+    if (input.kind && event.kind !== input.kind) return false;
+    if (input.onlyFailures && event.ok) return false;
+    if (query.length > 0 && !`${event.label} ${event.kind}`.toLowerCase().includes(query)) return false;
+    return true;
+  });
+  return { events, failures: events.filter((event) => !event.ok).length, copyMarkdown: buildReleaseOpsEventTimeline(events).copyMarkdown, empty: events.length === 0 };
+}
+
+export interface ScenarioReplayFormField {
+  name: string;
+  value: string;
+}
+
+export interface ScenarioReplayForm {
+  id: string;
+  title: string;
+  command: string;
+  fields: ScenarioReplayFormField[];
+  submitMode: 'dry-run';
+}
+
+export interface ScenarioReplayBuilder {
+  forms: ScenarioReplayForm[];
+}
+
+export function buildScenarioReplayBuilder(library: ReplayScenarioLibrary): ScenarioReplayBuilder {
+  return {
+    forms: library.scenarios.map((scenario) => ({
+      id: scenario.id,
+      title: scenario.title,
+      command: scenario.command,
+      fields: [
+        { name: 'contentId', value: '<content-id>' },
+        { name: 'platforms', value: extractPlatforms(scenario.command) },
+        { name: 'budgetUsd', value: '1.00' },
+      ],
+      submitMode: 'dry-run',
+    })),
+  };
+}
+
+export interface WebNotificationItem {
+  kind: 'credential' | 'approval' | 'timeline';
+  severity: 'critical' | 'warning' | 'info';
+  label: string;
+}
+
+export interface WebNotificationCenter {
+  unread: number;
+  items: WebNotificationItem[];
+}
+
+export function buildWebNotificationCenter(input: { credentialHealth: CredentialHealthCenter; approvalRows: ApprovalStoreRow[]; timeline: ReleaseOpsEventTimeline }): WebNotificationCenter {
+  const items: WebNotificationItem[] = [];
+  for (const card of input.credentialHealth.cards.filter((card) => card.severity !== 'ok')) {
+    items.push({ kind: 'credential', severity: card.severity === 'critical' ? 'critical' : 'warning', label: `${card.platform}: ${card.note}` });
+  }
+  const pendingApprovals = input.approvalRows.filter((row) => row.status === 'pending');
+  if (pendingApprovals.length > 0) {
+    const highRisk = pendingApprovals.some((row) => row.risk === 'high');
+    items.push({ kind: 'approval', severity: highRisk ? 'critical' : 'warning', label: `${pendingApprovals.length} actions require approval` });
+  }
+  for (const event of input.timeline.events.filter((event) => !event.ok)) {
+    items.push({ kind: 'timeline', severity: 'warning', label: event.label });
+  }
+  const order: Record<WebNotificationItem['kind'], number> = { credential: 0, approval: 1, timeline: 2 };
+  items.sort((a, b) => order[a.kind] - order[b.kind] || a.label.localeCompare(b.label));
+  return { unread: items.length, items };
+}
+
+export interface OperatorSessionAction {
+  at: string;
+  action: string;
+  target: string;
+  result: 'ok' | 'blocked';
+}
+
+export interface OperatorSessionReplay {
+  total: number;
+  replayCommand: string;
+  copyMarkdown: string;
+}
+
+export function buildOperatorSessionReplay(actions: OperatorSessionAction[]): OperatorSessionReplay {
+  const sorted = [...actions].sort((a, b) => a.at.localeCompare(b.at));
+  return {
+    total: sorted.length,
+    replayCommand: 'npm run cli production',
+    copyMarkdown: ['# Operator Session Replay', '', ...sorted.map((action) => `- ${action.at} ${action.result}: ${action.action} -> ${action.target}`), ''].join('\n'),
+  };
+}
+
+export interface WebModeExperiencePackInput {
+  gates: string[];
+  approvalQueue: ProductionApprovalQueue;
+  credentialHealth: CredentialHealthCenter;
+  scenarios: ReplayScenarioLibrary;
+  timeline: ReleaseOpsEventTimeline;
+}
+
+export interface WebModeExperiencePack {
+  mode: 'operator-workbench';
+  commandPalette: WebCommandPalette;
+  credentialWizard: CredentialSetupWizard;
+  scenarioBuilder: ScenarioReplayBuilder;
+  notificationCenter: WebNotificationCenter;
+  nextDirections: WebModeEnhancementDirection[];
+}
+
+export function buildWebModeExperiencePack(input: WebModeExperiencePackInput): WebModeExperiencePack {
+  const approvalRows = buildPersistentApprovalStore(input.approvalQueue, { rootDir: '.ima/release-ops', now: '1970-01-01T00:00:00.000Z' }).rows;
+  return {
+    mode: 'operator-workbench',
+    commandPalette: buildWebCommandPalette(input.gates),
+    credentialWizard: buildCredentialSetupWizard(input.credentialHealth),
+    scenarioBuilder: buildScenarioReplayBuilder(input.scenarios),
+    notificationCenter: buildWebNotificationCenter({ credentialHealth: input.credentialHealth, approvalRows, timeline: input.timeline }),
+    nextDirections: buildWebModeEnhancementDirections(),
+  };
+}
+
+function groupChangedFiles(files: string[]): ApprovalDiffPreview['changedFileGroups'] {
+  return {
+    productCode: files.filter((file) => file.startsWith('packages/')),
+    docs: files.filter((file) => file.startsWith('docs/') || file.endsWith('.md')),
+    other: files.filter((file) => !file.startsWith('packages/') && !file.startsWith('docs/') && !file.endsWith('.md')),
+  };
+}
+
+function extractPlatforms(command: string): string {
+  const match = command.match(/--platforms\s+([^\s]+)/);
+  if (match?.[1]) return match[1];
+  const parts = command.trim().split(/\s+/);
+  return parts.at(-1) ?? '';
+}
+
 function credentialSeverity(status: CredentialRotationItem['status']): CredentialHealthCard['severity'] {
   if (status === 'missing') return 'critical';
   if (status === 'rotate_soon' || status === 'scope_review') return 'warning';

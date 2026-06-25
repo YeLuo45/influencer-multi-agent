@@ -17,6 +17,14 @@ import {
   buildReleaseOpsEventTimeline,
   buildSafeExecutePlan,
   buildWebModeEnhancementDirections,
+  buildWebCommandPalette,
+  buildApprovalDiffPreview,
+  buildCredentialSetupWizard,
+  filterReleaseOpsTimeline,
+  buildScenarioReplayBuilder,
+  buildWebNotificationCenter,
+  buildOperatorSessionReplay,
+  buildWebModeExperiencePack,
   type PlatformConnectorInput,
   type ProductionApprovalAction,
   type ProductionRunRecord,
@@ -185,4 +193,79 @@ void test('buildWebModeEnhancementDirections returns the next web-focused iterat
   assert.equal(directions[0]?.id, 'guided-command-palette');
   assert.ok(directions.some((direction) => direction.id === 'approval-diff-preview'));
   assert.ok(directions.every((direction) => direction.area === 'web-mode'));
+});
+
+void test('buildWebCommandPalette groups safe operator commands by intent', () => {
+  const palette = buildWebCommandPalette(['check', 'test', 'deploy']);
+  assert.equal(palette.primary.id, 'run-all-gates');
+  assert.deepEqual(palette.commands.map((command) => command.id), ['run-all-gates', 'copy-safe-execute', 'open-credential-wizard']);
+  assert.equal(palette.commands.every((command) => command.sideEffects === false), true);
+});
+
+void test('buildApprovalDiffPreview summarizes risk, command, payload and changed files', () => {
+  const preview = buildApprovalDiffPreview({ actionId: 'post-x-1', command: 'npm run cli publish-cli --real x', payload: { platform: 'x', title: 'T' }, changedFiles: ['packages/core/src/production-ops.ts', 'docs/prd.v9.md'], risk: 'high' });
+  assert.equal(preview.actionId, 'post-x-1');
+  assert.equal(preview.risk, 'high');
+  assert.deepEqual(preview.changedFileGroups.productCode, ['packages/core/src/production-ops.ts']);
+  assert.match(preview.copyMarkdown, /npm run cli publish-cli/);
+});
+
+void test('buildCredentialSetupWizard gives ordered masked setup steps', () => {
+  const wizard = buildCredentialSetupWizard(buildCredentialHealthCenter(buildCredentialRotationPlan([
+    { platform: 'x', envKey: 'IMA_X_TOKEN', present: false, expiresInDays: null, scopes: [] },
+  ])));
+  assert.equal(wizard.steps[0]?.id, 'collect-token');
+  assert.equal(wizard.steps.every((step) => step.displaysSecret === false), true);
+  assert.match(wizard.copyGuide, /IMA_X_TOKEN=\*\*\*/);
+});
+
+void test('filterReleaseOpsTimeline filters and searches one-screen events', () => {
+  const timeline = buildReleaseOpsEventTimeline([
+    { at: '2026-06-24T01:00:00.000Z', kind: 'approval', label: 'approval pending', ok: false },
+    { at: '2026-06-24T02:00:00.000Z', kind: 'ci', label: 'ci success', ok: true },
+  ]);
+  const filtered = filterReleaseOpsTimeline(timeline, { kind: 'approval', query: 'pending', onlyFailures: true });
+  assert.deepEqual(filtered.events.map((event) => event.label), ['approval pending']);
+  assert.equal(filtered.empty, false);
+});
+
+void test('buildScenarioReplayBuilder turns scenarios into editable web forms', () => {
+  const builder = buildScenarioReplayBuilder(buildReplayScenarioLibrary(['x', 'reddit']));
+  assert.equal(builder.forms.length, 5);
+  assert.deepEqual(builder.forms[0]?.fields.map((field) => field.name), ['contentId', 'platforms', 'budgetUsd']);
+  assert.equal(builder.forms.every((form) => form.submitMode === 'dry-run'), true);
+});
+
+void test('buildWebNotificationCenter prioritizes failures and pending approvals', () => {
+  const center = buildWebNotificationCenter({
+    credentialHealth: buildCredentialHealthCenter(buildCredentialRotationPlan([{ platform: 'x', envKey: 'IMA_X_TOKEN', present: false, expiresInDays: null, scopes: [] }])),
+    approvalRows: buildPersistentApprovalStore(buildApprovalQueue(actions), { rootDir: '.ima/release-ops', now: '2026-06-24T03:00:00.000Z' }).rows,
+    timeline: buildReleaseOpsEventTimeline([{ at: '2026-06-24T01:00:00.000Z', kind: 'ci', label: 'ci failed', ok: false }]),
+  });
+  assert.equal(center.unread, 3);
+  assert.deepEqual(center.items.map((item) => item.kind), ['credential', 'approval', 'timeline']);
+});
+
+void test('buildOperatorSessionReplay converts web actions into copy-ready report', () => {
+  const replay = buildOperatorSessionReplay([
+    { at: '2026-06-24T01:00:00.000Z', action: 'open-production', target: 'web', result: 'ok' },
+    { at: '2026-06-24T01:01:00.000Z', action: 'copy-runbook', target: 'approval', result: 'ok' },
+  ]);
+  assert.equal(replay.total, 2);
+  assert.match(replay.copyMarkdown, /copy-runbook/);
+  assert.equal(replay.replayCommand, 'npm run cli production');
+});
+
+void test('buildWebModeExperiencePack combines command palette, wizard, timeline and next directions', () => {
+  const pack = buildWebModeExperiencePack({
+    gates: ['check', 'test'],
+    approvalQueue: buildApprovalQueue(actions),
+    credentialHealth: buildCredentialHealthCenter(buildCredentialRotationPlan([{ platform: 'x', envKey: 'IMA_X_TOKEN', present: false, expiresInDays: null, scopes: [] }])),
+    scenarios: buildReplayScenarioLibrary(['x']),
+    timeline: buildReleaseOpsEventTimeline([{ at: '2026-06-24T01:00:00.000Z', kind: 'approval', label: 'approval pending', ok: false }]),
+  });
+  assert.equal(pack.mode, 'operator-workbench');
+  assert.equal(pack.commandPalette.commands.length, 3);
+  assert.equal(pack.notificationCenter.unread >= 2, true);
+  assert.equal(pack.nextDirections[0]?.id, 'guided-command-palette');
 });
