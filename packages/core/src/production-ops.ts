@@ -629,6 +629,41 @@ export interface WebModeExperiencePackInput {
   timeline: ReleaseOpsEventTimeline;
 }
 
+export interface SafeExecuteWebAction {
+  id: 'safe-execute';
+  label: string;
+  confirmationRequired: string;
+  command: string;
+  sideEffects: false;
+}
+
+export interface ScenarioPersistencePlan {
+  path: string;
+  appendPreview: string;
+  scenarioCount: number;
+}
+
+export interface DeliveryClosurePlan {
+  proposalId: string;
+  statusPath: ['in_test_acceptance', 'accepted', 'deployed', 'delivered'];
+  commands: string[];
+}
+
+export interface WebOpsCompletionPackInput extends WebModeExperiencePackInput {
+  proposalId: string;
+  sessionActions: OperatorSessionAction[];
+}
+
+export interface WebOpsCompletionPack {
+  proposalId: string;
+  webMode: WebModeExperiencePack;
+  safeExecuteAction: SafeExecuteWebAction;
+  scenarioPersistence: ScenarioPersistencePlan;
+  operatorTimeline: OperatorSessionReplay;
+  ciImport: CiAutoIngestPlan;
+  deliveryClosure: DeliveryClosurePlan;
+}
+
 export interface WebModeExperiencePack {
   mode: 'operator-workbench';
   commandPalette: WebCommandPalette;
@@ -647,6 +682,35 @@ export function buildWebModeExperiencePack(input: WebModeExperiencePackInput): W
     scenarioBuilder: buildScenarioReplayBuilder(input.scenarios),
     notificationCenter: buildWebNotificationCenter({ credentialHealth: input.credentialHealth, approvalRows, timeline: input.timeline }),
     nextDirections: buildWebModeEnhancementDirections(),
+  };
+}
+
+export function buildWebOpsCompletionPack(input: WebOpsCompletionPackInput): WebOpsCompletionPack {
+  const webMode = buildWebModeExperiencePack(input);
+  const scenarioRows = input.scenarios.scenarios.map((scenario) => JSON.stringify({ id: scenario.id, title: scenario.title, command: scenario.command, sideEffects: scenario.sideEffects }));
+  const statusPath: DeliveryClosurePlan['statusPath'] = ['in_test_acceptance', 'accepted', 'deployed', 'delivered'];
+  return {
+    proposalId: input.proposalId,
+    webMode,
+    safeExecuteAction: {
+      id: 'safe-execute',
+      label: 'Safe Execute',
+      confirmationRequired: `EXECUTE ${input.proposalId}`,
+      command: `npm run cli delivery safe-forward --proposal ${input.proposalId} --execute`,
+      sideEffects: false,
+    },
+    scenarioPersistence: {
+      path: '.ima/release-ops/scenarios.jsonl',
+      appendPreview: scenarioRows.join('\n') + (scenarioRows.length > 0 ? '\n' : ''),
+      scenarioCount: scenarioRows.length,
+    },
+    operatorTimeline: buildOperatorSessionReplay(input.sessionActions),
+    ciImport: buildCiAutoIngestPlan({ provider: 'github-actions', branch: 'master', artifactName: 'release-evidence' }),
+    deliveryClosure: {
+      proposalId: input.proposalId,
+      statusPath,
+      commands: statusPath.map((status) => `python3 mcp_aisp.py update-proposal-status --proposal-id ${input.proposalId} --status ${status}`),
+    },
   };
 }
 

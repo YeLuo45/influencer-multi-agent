@@ -19,3 +19,15 @@ void test('web ui: exposes realtime status and connects EventSource to refresh p
   assert.match(js, /loadStats\(\)/);
   assert.match(js, /loadMetrics\(\)/);
 });
+
+void test('web ui: exposes Web Ops completion controls in production panel', () => {
+  const html = readFileSync(resolve(repoRoot, 'apps/web/index.html'), 'utf-8');
+  const js = readFileSync(resolve(repoRoot, 'apps/web/app.js'), 'utf-8');
+
+  assert.match(html, /id="production-actions"/);
+  assert.match(js, /webOpsCompletion/);
+  assert.match(js, /Safe Execute/);
+  assert.match(js, /Credential Wizard/);
+  assert.match(js, /Replay Persistence/);
+  assert.match(js, /Delivery Closure/);
+});

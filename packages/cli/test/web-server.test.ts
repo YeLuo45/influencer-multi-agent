@@ -232,3 +232,22 @@ void test('web-server: buildAbReport reachable through ab API matches direct cal
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+void test('web-server: /api/production exposes composed Web Ops completion pack', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'ima-web-'));
+  let handle: WebServerHandle | null = null;
+  try {
+    const store = seedStore(root);
+    handle = await startWebServer({ store, port: 0, host: '127.0.0.1', now: () => '2026-06-25T00:00:00.000Z' });
+    const r = await getJson(`${handle.url}/api/production`);
+    assert.equal(r.status, 200);
+    const data = r.json as { webOpsCompletion?: { proposalId: string; safeExecuteAction: { confirmationRequired: string }; scenarioPersistence: { path: string }; deliveryClosure: { statusPath: string[] } } };
+    assert.equal(data.webOpsCompletion?.proposalId, 'P-20260625-009');
+    assert.equal(data.webOpsCompletion?.safeExecuteAction.confirmationRequired, 'EXECUTE P-20260625-009');
+    assert.equal(data.webOpsCompletion?.scenarioPersistence.path, '.ima/release-ops/scenarios.jsonl');
+    assert.deepEqual(data.webOpsCompletion?.deliveryClosure.statusPath, ['in_test_acceptance', 'accepted', 'deployed', 'delivered']);
+  } finally {
+    if (handle) await handle.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -46,6 +46,7 @@ import {
   buildReleaseOpsEventTimeline,
   buildSafeExecutePlan,
   buildWebModeEnhancementDirections,
+  buildWebOpsCompletionPack,
   recommendNextIterations,
   createPlatformAdapters,
   createStubChannelAdapter,
@@ -319,6 +320,18 @@ async function apiProduction(res: ServerResponse, ctx: HandleCtx): Promise<void>
   ]);
   const safeExecutePreview = buildSafeExecutePlan(approvalStore.rows, { actionId: 'copy-runbook', approvalToken: 'APPROVED copy-runbook' });
   const webModeEnhancements = buildWebModeEnhancementDirections();
+  const webOpsCompletion = buildWebOpsCompletionPack({
+    proposalId: 'P-20260625-009',
+    gates: gates.map((gate) => gate.name),
+    approvalQueue: executionReadiness.approvalQueue,
+    credentialHealth: credentialHealthCenter,
+    scenarios: replayScenarios,
+    timeline: eventTimeline,
+    sessionActions: [
+      { at: ctx.now(), action: 'open-production-panel', target: 'web', result: 'ok' },
+      { at: ctx.now(), action: 'copy-safe-execute', target: 'approval', result: 'ok' },
+    ],
+  });
   const snapshot = buildProductionConsoleSnapshot({
     replies: executeReplyQueue([], { sandbox: true, now: ctx.now(), actor: 'web' }),
     budget,
@@ -329,7 +342,7 @@ async function apiProduction(res: ServerResponse, ctx: HandleCtx): Promise<void>
     tokenLedger: { totalCalls: tokenEntries.length, totalCostUsd: tokenEntries.reduce((sum, entry) => sum + entry.costUsd, 0) },
     replyQueue: buildReplyQueueState([]),
   });
-  sendJson(res, { ...snapshot, evidence, safeForward, failureChecklist: checklist, deliveryMarkdown: buildDeliveryMarkdown(evidence, safeForward), history, safeForwardCommand, safeForwardExecution, runbook, structuredRunbook, recommendations, webActions, releaseOpsDashboard, compactedHistory, releaseLocalHardening, executionReadiness, connectorExecution, approvalStore, credentialHealthCenter, ciArtifactIngest, replayScenarios, eventTimeline, safeExecutePreview, webModeEnhancements });
+  sendJson(res, { ...snapshot, evidence, safeForward, failureChecklist: checklist, deliveryMarkdown: buildDeliveryMarkdown(evidence, safeForward), history, safeForwardCommand, safeForwardExecution, runbook, structuredRunbook, recommendations, webActions, releaseOpsDashboard, compactedHistory, releaseLocalHardening, executionReadiness, connectorExecution, approvalStore, credentialHealthCenter, ciArtifactIngest, replayScenarios, eventTimeline, safeExecutePreview, webModeEnhancements, webOpsCompletion });
 }
 
 async function apiRoadmap(res: ServerResponse, _ctx: HandleCtx): Promise<void> {

@@ -219,6 +219,7 @@ async function loadProduction() {
   const data = await fetchJson('/api/production');
   const dashboard = data.releaseOpsDashboard ?? {};
   const readiness = data.executionReadiness ?? {};
+  const completion = data.webOpsCompletion ?? {};
   const actions = data.webActions?.actions ?? [];
   els.productionActions.innerHTML = `
     <div class="ops-summary">
@@ -235,6 +236,10 @@ async function loadProduction() {
           ${escapeHtml(action.label)}
         </button>
       `).join('')}
+      <button class="btn-secondary production-action" data-action-id="webops-safe-execute" data-payload="${escapeHtml(completion.safeExecuteAction?.command ?? '')}">Safe Execute</button>
+      <button class="btn-secondary production-action" data-action-id="webops-credential-wizard" data-payload="${escapeHtml(completion.webMode?.credentialWizard?.copyGuide ?? '')}">Credential Wizard</button>
+      <button class="btn-secondary production-action" data-action-id="webops-replay-persistence" data-payload="${escapeHtml(completion.scenarioPersistence?.appendPreview ?? '')}">Replay Persistence</button>
+      <button class="btn-secondary production-action" data-action-id="webops-delivery-closure" data-payload="${escapeHtml((completion.deliveryClosure?.commands ?? []).join('\n'))}">Delivery Closure</button>
     </div>
     <div class="ops-detail">
       <strong>Failed queue:</strong> ${(dashboard.failedQueue ?? []).map((item) => escapeHtml(item.gate)).join(', ') || 'none'}
@@ -259,6 +264,7 @@ async function loadProduction() {
     });
   });
   els.productionOutput.textContent = JSON.stringify({
+    webOpsCompletion: data.webOpsCompletion,
     releaseOpsDashboard: data.releaseOpsDashboard,
     executionReadiness: data.executionReadiness,
     connectorExecution: data.connectorExecution,

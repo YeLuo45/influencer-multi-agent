@@ -25,6 +25,7 @@ import {
   buildWebNotificationCenter,
   buildOperatorSessionReplay,
   buildWebModeExperiencePack,
+  buildWebOpsCompletionPack,
   type PlatformConnectorInput,
   type ProductionApprovalAction,
   type ProductionRunRecord,
@@ -268,4 +269,23 @@ void test('buildWebModeExperiencePack combines command palette, wizard, timeline
   assert.equal(pack.commandPalette.commands.length, 3);
   assert.equal(pack.notificationCenter.unread >= 2, true);
   assert.equal(pack.nextDirections[0]?.id, 'guided-command-palette');
+});
+
+void test('buildWebOpsCompletionPack aggregates all remaining unattended web ops directions', () => {
+  const completion = buildWebOpsCompletionPack({
+    proposalId: 'P-20260625-009',
+    gates: ['check', 'test', 'coverage', 'build', 'verify:readme'],
+    approvalQueue: buildApprovalQueue(actions),
+    credentialHealth: buildCredentialHealthCenter(buildCredentialRotationPlan([{ platform: 'x', envKey: 'IMA_X_TOKEN', present: false, expiresInDays: null, scopes: [] }])),
+    scenarios: buildReplayScenarioLibrary(['x', 'reddit']),
+    timeline: buildReleaseOpsEventTimeline([{ at: '2026-06-24T01:00:00.000Z', kind: 'ci', label: 'ci ok', ok: true }]),
+    sessionActions: [{ at: '2026-06-24T01:00:00.000Z', action: 'copy-safe-execute', target: 'approval', result: 'ok' }],
+  });
+  assert.equal(completion.proposalId, 'P-20260625-009');
+  assert.equal(completion.webMode.mode, 'operator-workbench');
+  assert.equal(completion.safeExecuteAction.confirmationRequired, 'EXECUTE P-20260625-009');
+  assert.equal(completion.scenarioPersistence.path, '.ima/release-ops/scenarios.jsonl');
+  assert.equal(completion.ciImport.commands[0], 'gh run list --branch master --limit 1 --json databaseId,conclusion,headSha');
+  assert.equal(completion.deliveryClosure.statusPath.join(' -> '), 'in_test_acceptance -> accepted -> deployed -> delivered');
+  assert.match(completion.operatorTimeline.copyMarkdown, /copy-safe-execute/);
 });
