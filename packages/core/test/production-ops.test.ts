@@ -27,6 +27,7 @@ import {
   buildWebModeExperiencePack,
   buildWebOpsCompletionPack,
   buildProductionExecutionSlaPack,
+  buildWebOpsWorkbenchPack,
   type PlatformConnectorInput,
   type ProductionApprovalAction,
   type ProductionRunRecord,
@@ -312,4 +313,38 @@ void test('buildProductionExecutionSlaPack models execution readiness, audit per
   assert.deepEqual(pack.credentialProbe.rows.map((row) => row.status), ['warning', 'critical']);
   assert.equal(pack.slaDashboard.status, 'attention');
   assert.ok(pack.slaDashboard.metrics.some((metric) => metric.id === 'pending-approval-age'));
+});
+
+void test('buildWebOpsWorkbenchPack completes all seven web operations directions without side effects', () => {
+  const approvalStore = buildPersistentApprovalStore(buildApprovalQueue(actions), { rootDir: '.ima/release-ops', now: '2026-06-25T05:00:00.000Z' });
+  const credentialHealth = buildCredentialHealthCenter(buildCredentialRotationPlan([
+    { platform: 'x', envKey: 'IMA_X_TOKEN', present: true, expiresInDays: 3, scopes: ['post:write'] },
+    { platform: 'reddit', envKey: 'IMA_REDDIT_TOKEN', present: false, expiresInDays: null, scopes: [] },
+  ]));
+  const pack = buildWebOpsWorkbenchPack({
+    proposalId: 'P-20260625-014',
+    now: '2026-06-25T05:30:00.000Z',
+    approvalRows: approvalStore.rows,
+    credentialHealth,
+    ciArtifacts: [
+      { path: '.ima/release-ops/ci/evidence.json', exists: true, modifiedAt: '2026-06-25T05:00:00.000Z', conclusion: 'success' },
+      { path: '.ima/release-ops/ci/old.json', exists: false, modifiedAt: '2026-06-25T04:00:00.000Z', conclusion: 'failure' },
+    ],
+    auditEvents: [
+      { at: '2026-06-25T05:01:00.000Z', action: 'open-production-panel', target: 'web', result: 'ok' },
+      { at: '2026-06-25T05:02:00.000Z', action: 'copy-safe-execute', target: 'approval', result: 'ok' },
+    ],
+    runs,
+    changedFiles: ['packages/core/src/production-ops.ts', 'docs/prd.v11.md'],
+  });
+  assert.equal(pack.proposalId, 'P-20260625-014');
+  assert.deepEqual(pack.directions.map((direction) => direction.id), ['approval-diff-preview', 'credential-setup-wizard-v2', 'sla-alert-center', 'operator-session-replay', 'ci-artifact-browser', 'safe-execute-ledger-persistence', 'web-command-palette']);
+  assert.equal(pack.approvalDiffPreview.actionId, 'post-x-1');
+  assert.equal(pack.credentialSetupWizard.missing.length, 1);
+  assert.equal(pack.slaAlertCenter.alerts[0]?.severity, 'critical');
+  assert.equal(pack.operatorSessionReplay.total, 2);
+  assert.equal(pack.ciArtifactBrowser.artifacts[0]?.status, 'found');
+  assert.equal(pack.safeExecuteLedger.path, '.ima/release-ops/safe-execute-ledger.jsonl');
+  assert.equal(pack.webCommandPalette.primary.id, 'run-all-gates');
+  assert.equal(pack.sideEffects, false);
 });

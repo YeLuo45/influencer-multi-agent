@@ -42,3 +42,16 @@ void test('web ui: exposes production execution SLA controls', () => {
   assert.match(js, /Credential Probe/);
   assert.match(js, /SLA Dashboard/);
 });
+
+void test('web ui: exposes complete Web Ops workbench controls', () => {
+  const js = readFileSync(resolve(repoRoot, 'apps/web/app.js'), 'utf-8');
+
+  assert.match(js, /webOpsWorkbench/);
+  assert.match(js, /Approval Diff Preview/);
+  assert.match(js, /Credential Setup Wizard v2/);
+  assert.match(js, /SLA Alert Center/);
+  assert.match(js, /Operator Session Replay/);
+  assert.match(js, /CI Artifact Browser/);
+  assert.match(js, /Safe Execute Ledger/);
+  assert.match(js, /Web Command Palette/);
+});

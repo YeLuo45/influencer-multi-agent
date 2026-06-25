@@ -221,6 +221,7 @@ async function loadProduction() {
   const readiness = data.executionReadiness ?? {};
   const completion = data.webOpsCompletion ?? {};
   const executionSla = data.executionSla ?? {};
+  const webOpsWorkbench = data.webOpsWorkbench ?? {};
   const actions = data.webActions?.actions ?? [];
   els.productionActions.innerHTML = `
     <div class="ops-summary">
@@ -231,6 +232,7 @@ async function loadProduction() {
       ${badge(`exec=${readiness.status ?? 'unknown'}`, readiness.status === 'ready' ? 'posted' : 'failed_retry')}
       ${badge(`connectors=${readiness.connectorMatrix?.ready ?? 0}/${readiness.connectorMatrix?.total ?? 0}`, readiness.connectorMatrix?.blocked ? 'failed_retry' : 'posted')}
       ${badge(`sla=${executionSla.slaDashboard?.status ?? 'unknown'}`, executionSla.slaDashboard?.status === 'ok' ? 'posted' : 'failed_retry')}
+      ${badge(`workbench=${webOpsWorkbench.directions?.length ?? 0}/7`, webOpsWorkbench.sideEffects === false ? 'posted' : 'failed_retry')}
     </div>
     <div class="action-grid">
       ${actions.map((action) => `
@@ -247,6 +249,13 @@ async function loadProduction() {
       <button class="btn-secondary production-action" data-action-id="sla-ci-artifact-read" data-payload="${escapeHtml((executionSla.ciArtifactRead?.commands ?? []).join('\n'))}">CI Artifact Read</button>
       <button class="btn-secondary production-action" data-action-id="sla-credential-probe" data-payload="${escapeHtml((executionSla.credentialProbe?.rows ?? []).map((row) => row.probeCommand).join('\n'))}">Credential Probe</button>
       <button class="btn-secondary production-action" data-action-id="sla-dashboard" data-payload="${escapeHtml(JSON.stringify(executionSla.slaDashboard ?? {}, null, 2))}">SLA Dashboard</button>
+      <button class="btn-secondary production-action" data-action-id="workbench-approval-diff" data-payload="${escapeHtml(webOpsWorkbench.approvalDiffPreview?.copyMarkdown ?? '')}">Approval Diff Preview</button>
+      <button class="btn-secondary production-action" data-action-id="workbench-credential-wizard-v2" data-payload="${escapeHtml(webOpsWorkbench.credentialSetupWizard?.copyGuide ?? '')}">Credential Setup Wizard v2</button>
+      <button class="btn-secondary production-action" data-action-id="workbench-sla-alert-center" data-payload="${escapeHtml(JSON.stringify(webOpsWorkbench.slaAlertCenter ?? {}, null, 2))}">SLA Alert Center</button>
+      <button class="btn-secondary production-action" data-action-id="workbench-session-replay" data-payload="${escapeHtml(webOpsWorkbench.operatorSessionReplay?.copyMarkdown ?? '')}">Operator Session Replay</button>
+      <button class="btn-secondary production-action" data-action-id="workbench-ci-browser" data-payload="${escapeHtml(JSON.stringify(webOpsWorkbench.ciArtifactBrowser ?? {}, null, 2))}">CI Artifact Browser</button>
+      <button class="btn-secondary production-action" data-action-id="workbench-safe-ledger" data-payload="${escapeHtml(webOpsWorkbench.safeExecuteLedger?.appendPreview ?? '')}">Safe Execute Ledger</button>
+      <button class="btn-secondary production-action" data-action-id="workbench-command-palette" data-payload="${escapeHtml(JSON.stringify(webOpsWorkbench.webCommandPalette ?? {}, null, 2))}">Web Command Palette</button>
     </div>
     <div class="ops-detail">
       <strong>Failed queue:</strong> ${(dashboard.failedQueue ?? []).map((item) => escapeHtml(item.gate)).join(', ') || 'none'}
@@ -272,6 +281,7 @@ async function loadProduction() {
     });
   });
   els.productionOutput.textContent = JSON.stringify({
+    webOpsWorkbench: data.webOpsWorkbench,
     executionSla: data.executionSla,
     webOpsCompletion: data.webOpsCompletion,
     releaseOpsDashboard: data.releaseOpsDashboard,

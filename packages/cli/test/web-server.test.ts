@@ -270,3 +270,24 @@ void test('web-server: /api/production exposes execution SLA pack', async () => 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+void test('web-server: /api/production exposes complete Web Ops workbench pack', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'ima-web-'));
+  let handle: WebServerHandle | null = null;
+  try {
+    const store = seedStore(root);
+    handle = await startWebServer({ store, port: 0, host: '127.0.0.1', now: () => '2026-06-25T05:30:00.000Z' });
+    const r = await getJson(`${handle.url}/api/production`);
+    assert.equal(r.status, 200);
+    const data = r.json as { webOpsWorkbench?: { proposalId: string; sideEffects: boolean; directions: Array<{ id: string }>; ciArtifactBrowser: { artifacts: unknown[] }; safeExecuteLedger: { path: string }; slaAlertCenter: { alerts: Array<{ severity: string }> } } };
+    assert.equal(data.webOpsWorkbench?.proposalId, 'P-20260625-014');
+    assert.equal(data.webOpsWorkbench?.sideEffects, false);
+    assert.equal(data.webOpsWorkbench?.directions.length, 7);
+    assert.equal(data.webOpsWorkbench?.safeExecuteLedger.path, '.ima/release-ops/safe-execute-ledger.jsonl');
+    assert.ok((data.webOpsWorkbench?.ciArtifactBrowser.artifacts.length ?? 0) > 0);
+    assert.ok(data.webOpsWorkbench?.slaAlertCenter.alerts.some((alert) => alert.severity === 'critical' || alert.severity === 'warning'));
+  } finally {
+    if (handle) await handle.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

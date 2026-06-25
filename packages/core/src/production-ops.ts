@@ -683,6 +683,55 @@ export interface ProductionExecutionSlaPack {
   slaDashboard: { status: 'ok' | 'attention'; metrics: Array<{ id: string; value: number; unit: string; status: 'ok' | 'attention' }> };
 }
 
+export interface WebOpsWorkbenchInput extends ProductionExecutionSlaInput {
+  changedFiles: string[];
+  ciArtifacts: Array<{ path: string; exists: boolean; modifiedAt: string; conclusion?: string }>;
+}
+
+export interface WebOpsWorkbenchDirection {
+  id: 'approval-diff-preview' | 'credential-setup-wizard-v2' | 'sla-alert-center' | 'operator-session-replay' | 'ci-artifact-browser' | 'safe-execute-ledger-persistence' | 'web-command-palette';
+  label: string;
+  status: 'ready' | 'attention';
+}
+
+export interface CredentialSetupWizardV2 {
+  missing: CredentialHealthCard[];
+  expiring: CredentialHealthCard[];
+  checklist: Array<{ id: string; label: string; done: boolean }>;
+  copyGuide: string;
+}
+
+export interface SlaAlertCenter {
+  status: 'ok' | 'attention';
+  alerts: Array<{ id: string; severity: 'info' | 'warning' | 'critical'; message: string }>;
+}
+
+export interface CiArtifactBrowser {
+  artifacts: Array<{ path: string; status: 'found' | 'missing'; modifiedAt: string; conclusion: string }>;
+  latestPath: string | null;
+  readOnly: true;
+}
+
+export interface SafeExecuteLedgerPreview {
+  path: string;
+  appendPreview: string;
+  rowCount: number;
+  sideEffects: false;
+}
+
+export interface WebOpsWorkbenchPack {
+  proposalId: string;
+  directions: WebOpsWorkbenchDirection[];
+  approvalDiffPreview: ApprovalDiffPreview;
+  credentialSetupWizard: CredentialSetupWizardV2;
+  slaAlertCenter: SlaAlertCenter;
+  operatorSessionReplay: OperatorSessionReplay;
+  ciArtifactBrowser: CiArtifactBrowser;
+  safeExecuteLedger: SafeExecuteLedgerPreview;
+  webCommandPalette: WebCommandPalette;
+  sideEffects: false;
+}
+
 export interface WebModeExperiencePack {
   mode: 'operator-workbench';
   commandPalette: WebCommandPalette;
@@ -776,6 +825,87 @@ export function buildProductionExecutionSlaPack(input: ProductionExecutionSlaInp
       status: metrics.some((metric) => metric.status === 'attention') ? 'attention' : 'ok',
       metrics,
     },
+  };
+}
+
+export function buildWebOpsWorkbenchPack(input: WebOpsWorkbenchInput): WebOpsWorkbenchPack {
+  const firstPending = input.approvalRows.find((row) => row.status === 'pending') ?? input.approvalRows[0];
+  const credentialSetupWizard = buildCredentialSetupWizardV2(input.credentialHealth);
+  const slaAlertCenter = buildSlaAlertCenter(buildProductionExecutionSlaPack(input));
+  const ciArtifactBrowser = buildCiArtifactBrowser(input.ciArtifacts);
+  const safeExecuteLedger = buildSafeExecuteLedgerPreview(input.approvalRows);
+  const approvalDiffPreview = buildApprovalDiffPreview({
+    actionId: firstPending?.id ?? 'no-pending-action',
+    command: firstPending?.command ?? 'noop',
+    payload: { proposalId: input.proposalId, approvalToken: firstPending?.approvalToken ?? '' },
+    changedFiles: input.changedFiles,
+    risk: firstPending?.risk ?? 'low',
+  });
+  const operatorSessionReplay = buildOperatorSessionReplay(input.auditEvents);
+  const webCommandPalette = buildWebCommandPalette(['check', 'test', 'coverage', 'build', 'verify:readme']);
+  const directionStatus = (attention: boolean): WebOpsWorkbenchDirection['status'] => attention ? 'attention' : 'ready';
+  return {
+    proposalId: input.proposalId,
+    directions: [
+      { id: 'approval-diff-preview', label: 'Approval Diff Preview', status: directionStatus(approvalDiffPreview.risk === 'high') },
+      { id: 'credential-setup-wizard-v2', label: 'Credential Setup Wizard v2', status: directionStatus(credentialSetupWizard.missing.length > 0 || credentialSetupWizard.expiring.length > 0) },
+      { id: 'sla-alert-center', label: 'SLA Alert Center', status: slaAlertCenter.status === 'attention' ? 'attention' : 'ready' },
+      { id: 'operator-session-replay', label: 'Operator Session Replay', status: directionStatus(operatorSessionReplay.total === 0) },
+      { id: 'ci-artifact-browser', label: 'CI Artifact Browser', status: directionStatus(ciArtifactBrowser.artifacts.some((artifact) => artifact.status === 'missing')) },
+      { id: 'safe-execute-ledger-persistence', label: 'Safe Execute Ledger', status: directionStatus(safeExecuteLedger.rowCount === 0) },
+      { id: 'web-command-palette', label: 'Web Command Palette', status: 'ready' },
+    ],
+    approvalDiffPreview,
+    credentialSetupWizard,
+    slaAlertCenter,
+    operatorSessionReplay,
+    ciArtifactBrowser,
+    safeExecuteLedger,
+    webCommandPalette,
+    sideEffects: false,
+  };
+}
+
+function buildCredentialSetupWizardV2(credentialHealth: CredentialHealthCenter): CredentialSetupWizardV2 {
+  const missing = credentialHealth.cards.filter((card) => card.severity === 'critical');
+  const expiring = credentialHealth.cards.filter((card) => card.severity === 'warning');
+  const checklist = [
+    { id: 'collect-token', label: 'Collect platform token outside the browser', done: missing.length === 0 },
+    { id: 'write-env', label: 'Write masked env key into local .env', done: missing.length === 0 },
+    { id: 'probe-health', label: 'Run credential probe before real posting', done: credentialHealth.ok },
+    { id: 'scope-review', label: 'Review scopes before enabling execute mode', done: expiring.length === 0 },
+  ];
+  return {
+    missing,
+    expiring,
+    checklist,
+    copyGuide: ['# Credential Setup Wizard v2', ...credentialHealth.cards.map((card) => `- ${card.platform}: ${card.visible} (${card.severity}) ${card.note}`), ''].join('\n'),
+  };
+}
+
+function buildSlaAlertCenter(sla: ProductionExecutionSlaPack): SlaAlertCenter {
+  const severityRank = { critical: 0, warning: 1, info: 2 };
+  const alerts = sla.slaDashboard.metrics.filter((metric) => metric.status === 'attention').map((metric) => ({
+    id: metric.id,
+    severity: metric.id === 'credential-expiry' ? 'critical' as const : 'warning' as const,
+    message: `${metric.id}: ${metric.value} ${metric.unit}`,
+  })).sort((a, b) => severityRank[a.severity] - severityRank[b.severity] || a.id.localeCompare(b.id));
+  return { status: alerts.length > 0 ? 'attention' : 'ok', alerts: alerts.length > 0 ? alerts : [{ id: 'all-clear', severity: 'info', message: 'All execution SLA metrics are clear' }] };
+}
+
+function buildCiArtifactBrowser(artifacts: WebOpsWorkbenchInput['ciArtifacts']): CiArtifactBrowser {
+  const rows = artifacts.map((artifact) => ({ path: artifact.path, status: artifact.exists ? 'found' as const : 'missing' as const, modifiedAt: artifact.modifiedAt, conclusion: artifact.conclusion ?? 'unknown' }))
+    .sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt));
+  return { artifacts: rows, latestPath: rows.find((artifact) => artifact.status === 'found')?.path ?? null, readOnly: true };
+}
+
+function buildSafeExecuteLedgerPreview(rows: ApprovalStoreRow[]): SafeExecuteLedgerPreview {
+  const ledgerRows = rows.map((row) => JSON.stringify({ actionId: row.id, status: row.status, risk: row.risk, command: row.command, at: row.at }));
+  return {
+    path: '.ima/release-ops/safe-execute-ledger.jsonl',
+    appendPreview: ledgerRows.join('\n') + (ledgerRows.length > 0 ? '\n' : ''),
+    rowCount: ledgerRows.length,
+    sideEffects: false,
   };
 }
 
